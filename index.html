@@ -1934,89 +1934,102 @@ async function runScan() {
         const query = scanMode === 'named' ? keyword + ' ' + townShort : keyword;
 
         try {
-            const serperBody = { q: query, num: 20, gl: 'us' };
-            if (scanMode === 'geo') {
-                serperBody.location = town.name;
-            }
-
-            const resp = await fetch('https://google.serper.dev/search', {
-                method: 'POST',
-                headers: {
-                    'X-API-KEY': apiKey,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(serperBody)
-            });
-
-            if (!resp.ok) {
-                const errText = await resp.text();
-                console.error('Serper error:', resp.status, errText);
-                errors++;
-                if (resp.status === 401 || resp.status === 403) {
-                    throw new Error('INVALID_KEY');
-                }
-                return;
-            }
-
-            const result = await resp.json();
-            // Debug: log all top-level keys from first result to see what Serper returns
-            if (done === 0) {
-                console.log('Serper response keys:', Object.keys(result));
-                console.log('Full first response:', JSON.stringify(result).slice(0, 3000));
-            }
-            const organic = result.organic || [];
-            const ads = result.ads || [];
-            const places = result.places || result.localPack || result.local || [];
-            const lsa = result.localServiceAds || result.serviceAds || [];
-
-            // Helper to find our rank in a result list
-            function findRankIn(list) {
-                for (let i = 0; i < list.length; i++) {
-                    const entry = list[i];
-                    const title = (entry.title || entry.name || '').toLowerCase();
-                    const link = (entry.link || entry.website || '').toLowerCase();
-                    const snippet = (entry.snippet || entry.description || '').toLowerCase();
-                    const matched = searchTerms.some(term =>
-                        title.includes(term) || link.includes(term) || snippet.includes(term)
-                    );
-                    if (matched) return { rank: i + 1, url: entry.link || entry.website || '', title: entry.title || entry.name || '' };
-                }
-                return { rank: 0, url: '', title: '' };
-            }
-
-            const organicMatch = findRankIn(organic);
-            const ppcMatch = findRankIn(ads);
-            const mapPackMatch = findRankIn(places);
-            const lsaMatch = findRankIn(lsa);
-
-            // Keep backward-compatible rank/foundUrl/foundTitle for organic
-            let rank = organicMatch.rank || 20;
-            let foundUrl = organicMatch.url;
-            let foundTitle = organicMatch.title;
-
-            const topResults = organic.slice(0, 20).map((e, idx) => ({
-                pos: idx + 1,
-                title: e.title || '',
-                link: e.link || '',
-                snippet: e.snippet || ''
-            }));
-
-            // Screenshots run one at a time (Puppeteer is single-browser)
+            let rank = 20, foundUrl = '', foundTitle = '';
+            let rankLsa = 0, rankPpc = 0, rankMap = 0, rankOrganic = 20;
+            let topResults = [];
             let screenshot = '';
+
+            // If scrape server is available, use it for full SERP data (all 4 types + screenshot)
             if (screenshotServerAvailable) {
                 try {
-                    const ssResp = await fetch('http://localhost:3456/screenshot', {
+                    const scrapeResp = await fetch('http://localhost:3456/scrape', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query })
+                        body: JSON.stringify({ query, businessTerms: searchTerms })
                     });
-                    if (ssResp.ok) {
-                        const ssData = await ssResp.json();
-                        screenshot = ssData.screenshot || '';
+
+                    if (scrapeResp.ok) {
+                        const scrapeData = await scrapeResp.json();
+                        screenshot = scrapeData.screenshot || '';
+
+                        // Use server-side rank matching
+                        rankLsa = scrapeData.ranks.lsa.rank || 0;
+                        rankPpc = scrapeData.ranks.ppc.rank || 0;
+                        rankMap = scrapeData.ranks.map.rank || 0;
+                        rankOrganic = scrapeData.ranks.organic.rank || 20;
+
+                        rank = rankOrganic;
+                        foundUrl = scrapeData.ranks.organic.url || '';
+                        foundTitle = scrapeData.ranks.organic.title || '';
+
+                        // Build topResults from scraped organic
+                        topResults = (scrapeData.serpData.organic || []).slice(0, 20).map((e, idx) => ({
+                            pos: idx + 1,
+                            title: e.title || '',
+                            link: e.link || '',
+                            snippet: e.snippet || ''
+                        }));
+
+                        console.log(`Scraped [${query}] LSA:${scrapeData.serpData.lsa.length} PPC:${scrapeData.serpData.ppc.length} Map:${scrapeData.serpData.mapPack.length} Org:${scrapeData.serpData.organic.length}`);
+                    } else if (scrapeResp.status === 429) {
+                        console.warn('CAPTCHA detected, falling back to Serper API');
+                        screenshotServerAvailable = false; // Stop trying for remaining tasks
                     }
                 } catch (e) {
-                    console.warn('Screenshot failed for', query, e.message);
+                    console.warn('Scrape failed for', query, e.message, '- falling back to Serper');
                 }
+            }
+
+            // Fallback: use Serper API for organic results if scrape didn't work
+            if (topResults.length === 0) {
+                const serperBody = { q: query, num: 20, gl: 'us' };
+                if (scanMode === 'geo') {
+                    serperBody.location = town.name;
+                }
+
+                const resp = await fetch('https://google.serper.dev/search', {
+                    method: 'POST',
+                    headers: {
+                        'X-API-KEY': apiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(serperBody)
+                });
+
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    console.error('Serper error:', resp.status, errText);
+                    errors++;
+                    if (resp.status === 401 || resp.status === 403) {
+                        throw new Error('INVALID_KEY');
+                    }
+                    return;
+                }
+
+                const result = await resp.json();
+                const organic = result.organic || [];
+
+                // Find organic rank
+                for (let i = 0; i < organic.length; i++) {
+                    const entry = organic[i];
+                    const title = (entry.title || '').toLowerCase();
+                    const link = (entry.link || '').toLowerCase();
+                    const snippet = (entry.snippet || '').toLowerCase();
+                    if (searchTerms.some(term => title.includes(term) || link.includes(term) || snippet.includes(term))) {
+                        rank = i + 1;
+                        rankOrganic = i + 1;
+                        foundUrl = entry.link || '';
+                        foundTitle = entry.title || '';
+                        break;
+                    }
+                }
+
+                topResults = organic.slice(0, 20).map((e, idx) => ({
+                    pos: idx + 1,
+                    title: e.title || '',
+                    link: e.link || '',
+                    snippet: e.snippet || ''
+                }));
             }
 
             proj.rankings.push({
@@ -2026,10 +2039,10 @@ async function runScan() {
                 rank,
                 foundUrl,
                 foundTitle,
-                rankLsa: lsaMatch.rank,
-                rankPpc: ppcMatch.rank,
-                rankMap: mapPackMatch.rank,
-                rankOrganic: organicMatch.rank || 20,
+                rankLsa,
+                rankPpc,
+                rankMap,
+                rankOrganic,
                 query,
                 topResults,
                 screenshot,
@@ -2044,15 +2057,24 @@ async function runScan() {
         }
     }
 
-    // Run tasks in batches of PARALLEL
+    // When scrape server is running: sequential (Puppeteer = 1 browser)
+    // When using Serper API only: parallel batches of 5
     let aborted = false;
-    for (let i = 0; i < tasks.length && !aborted; i += PARALLEL) {
-        const batch = tasks.slice(i, i + PARALLEL);
-        const batchLabels = batch.map(t => {
+    const batchSize = screenshotServerAvailable ? 1 : PARALLEL;
+
+    for (let i = 0; i < tasks.length && !aborted; i += batchSize) {
+        const batch = tasks.slice(i, i + batchSize);
+        const taskNum = done + 1;
+        const taskEnd = Math.min(done + batchSize, totalTasks);
+
+        if (screenshotServerAvailable) {
+            const t = batch[0];
             const ts = townNameOnly(t.town.name);
-            return scanMode === 'geo' ? `"${t.keyword}" from ${ts}` : `"${t.keyword} ${ts}"`;
-        });
-        statusText.textContent = `Searching batch ${Math.floor(i / PARALLEL) + 1}/${Math.ceil(tasks.length / PARALLEL)} (${done + 1}-${Math.min(done + PARALLEL, totalTasks)}/${totalTasks})...`;
+            const label = scanMode === 'geo' ? `"${t.keyword}" from ${ts}` : `"${t.keyword} ${ts}"`;
+            statusText.textContent = `Scraping ${label} (${taskNum}/${totalTasks})...`;
+        } else {
+            statusText.textContent = `Searching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(tasks.length / batchSize)} (${taskNum}-${taskEnd}/${totalTasks})...`;
+        }
         progressFill.style.width = ((done / totalTasks) * 100) + '%';
 
         try {
@@ -2067,9 +2089,9 @@ async function runScan() {
 
         done += batch.length;
 
-        // Small delay between batches to be respectful
-        if (i + PARALLEL < tasks.length) {
-            await new Promise(r => setTimeout(r, 300));
+        // Delay between tasks
+        if (i + batchSize < tasks.length) {
+            await new Promise(r => setTimeout(r, screenshotServerAvailable ? 500 : 300));
         }
     }
 
