@@ -459,8 +459,7 @@
     </div>
     <div class="nav-tabs">
         <button class="nav-tab active" data-page="projects">Projects</button>
-        <button class="nav-tab" data-page="categories" id="tab-categories">Categories</button>
-        <button class="nav-tab" data-page="towns" id="tab-towns">Towns</button>
+        <button class="nav-tab" data-page="setup" id="tab-setup">Setup</button>
         <button class="nav-tab" data-page="rankings" id="tab-rankings">Rankings</button>
         <button class="nav-tab" data-page="heatmaps" id="tab-heatmaps">Heatmaps</button>
     </div>
@@ -491,117 +490,113 @@
         <div class="project-grid" id="projects-list"></div>
     </div>
 
-    <!-- CATEGORIES PAGE -->
-    <div class="page" id="page-categories">
+    <!-- SETUP PAGE (Categories + Towns) -->
+    <div class="page" id="page-setup">
         <div class="grid-2">
-            <div class="card">
-                <h2>Add Category</h2>
-                <div class="form-group">
-                    <label>Category Name</label>
-                    <input type="text" id="cat-name" placeholder="e.g., Plumbing Services">
-                </div>
-                <div class="form-group">
-                    <label>Keywords (one per line)</label>
-                    <textarea id="cat-keywords" placeholder="emergency plumber&#10;plumber near me&#10;24 hour plumber"></textarea>
-                </div>
-                <button class="btn btn-primary" onclick="addCategory()">Add Category</button>
-            </div>
-            <div class="card">
-                <h2>Categories in this Project</h2>
-                <div id="categories-list"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TOWNS PAGE -->
-    <div class="page" id="page-towns">
-        <div class="grid-2">
-            <div class="card">
-                <h2>Add Towns</h2>
-                <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
-                    Paste a list of town names (one per line). The state is appended automatically for accurate geocoding.
-                </p>
-
-                <!-- Single vs Multi state toggle -->
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-                    <label style="font-size:14px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:8px">
-                        <input type="checkbox" id="multi-state-toggle" onchange="toggleMultiState()"
-                            style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
-                        Towns in multiple states
-                    </label>
-                </div>
-
-                <!-- Single state mode -->
-                <div id="single-state-section">
+            <!-- LEFT COLUMN: Categories -->
+            <div>
+                <div class="card">
+                    <h2>Add Category</h2>
                     <div class="form-group">
-                        <label>State</label>
-                        <select id="single-state-select">
-                            <option value="">Select a state...</option>
-                        </select>
+                        <label>Category Name</label>
+                        <input type="text" id="cat-name" placeholder="e.g., Plumbing Services">
                     </div>
                     <div class="form-group">
-                        <label>Town List (one per line)</label>
-                        <textarea id="towns-paste-input" style="min-height:200px" placeholder="Springfield&#10;Shelbyville&#10;Ogdenville"></textarea>
+                        <label>Keywords (one per line)</label>
+                        <textarea id="cat-keywords" placeholder="emergency plumber&#10;plumber near me&#10;24 hour plumber" style="min-height:80px"></textarea>
                     </div>
-                    <button class="btn btn-primary" onclick="addTownsFromList()">Add Towns</button>
+                    <button class="btn btn-primary" onclick="addCategory()">Add Category</button>
                 </div>
+                <div class="card">
+                    <h2>Categories in this Project</h2>
+                    <div id="categories-list"></div>
+                </div>
+            </div>
 
-                <!-- Multi state mode -->
-                <div id="multi-state-section" style="display:none">
-                    <div class="form-group">
-                        <label>Add a state</label>
-                        <div style="display:flex;gap:8px">
-                            <select id="add-state-select" style="flex:1">
+            <!-- RIGHT COLUMN: Towns -->
+            <div>
+                <div class="card">
+                    <h2>Add Towns</h2>
+                    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">
+                        Paste town names (one per line). State is appended for geocoding.
+                    </p>
+
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                        <label style="font-size:13px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px">
+                            <input type="checkbox" id="multi-state-toggle" onchange="toggleMultiState()"
+                                style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer">
+                            Multiple states
+                        </label>
+                    </div>
+
+                    <div id="single-state-section">
+                        <div class="form-group">
+                            <label>State</label>
+                            <select id="single-state-select">
                                 <option value="">Select a state...</option>
                             </select>
-                            <button class="btn btn-primary" onclick="addStateBox()">Add State</button>
                         </div>
+                        <div class="form-group">
+                            <label>Town List (one per line)</label>
+                            <textarea id="towns-paste-input" style="min-height:120px" placeholder="Springfield&#10;Shelbyville&#10;Ogdenville"></textarea>
+                        </div>
+                        <button class="btn btn-primary" onclick="addTownsFromList()">Add Towns</button>
                     </div>
-                    <div id="multi-state-boxes"></div>
-                    <button class="btn btn-primary" onclick="addTownsMultiState()" id="add-multi-btn" style="display:none;margin-top:12px">Add All Towns</button>
+
+                    <div id="multi-state-section" style="display:none">
+                        <div class="form-group">
+                            <label>Add a state</label>
+                            <div style="display:flex;gap:8px">
+                                <select id="add-state-select" style="flex:1">
+                                    <option value="">Select a state...</option>
+                                </select>
+                                <button class="btn btn-primary" onclick="addStateBox()">Add State</button>
+                            </div>
+                        </div>
+                        <div id="multi-state-boxes"></div>
+                        <button class="btn btn-primary" onclick="addTownsMultiState()" id="add-multi-btn" style="display:none;margin-top:12px">Add All Towns</button>
+                    </div>
+
+                    <div class="status-bar" id="geocode-status">
+                        <div class="spinner"></div>
+                        <span id="geocode-status-text">Geocoding...</span>
+                    </div>
+                    <div class="progress-bar" id="geocode-progress" style="display:none">
+                        <div class="progress-fill" id="geocode-progress-fill" style="width:0%"></div>
+                    </div>
                 </div>
 
-                <div class="status-bar" id="geocode-status">
-                    <div class="spinner"></div>
-                    <span id="geocode-status-text">Geocoding...</span>
-                </div>
-                <div class="progress-bar" id="geocode-progress" style="display:none">
-                    <div class="progress-fill" id="geocode-progress-fill" style="width:0%"></div>
-                </div>
-            </div>
-            <div class="card">
-                <h2>Radius Filter</h2>
-                <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
-                    Only show towns within a certain distance from a central address. Towns outside the radius are hidden from rankings and heatmaps.
-                </p>
-                <div class="form-group">
-                    <label>Central Address</label>
-                    <div style="display:flex;gap:8px">
-                        <input type="text" id="radius-center-input" placeholder="e.g., London, UK" style="flex:1">
-                        <button class="btn btn-primary" onclick="setRadiusCenter()">Set</button>
+                <div class="card">
+                    <h2>Radius Filter</h2>
+                    <div class="form-group">
+                        <label>Central Address</label>
+                        <div style="display:flex;gap:8px">
+                            <input type="text" id="radius-center-input" placeholder="e.g., London, UK" style="flex:1">
+                            <button class="btn btn-primary btn-sm" onclick="setRadiusCenter()">Set</button>
+                        </div>
                     </div>
-                </div>
-                <div id="radius-center-info" style="display:none;margin-bottom:16px">
-                    <div style="font-size:13px;color:var(--text-dim)">
-                        Center: <strong id="radius-center-name" style="color:var(--text)"></strong>
-                        <span id="radius-center-coords" style="margin-left:8px"></span>
+                    <div id="radius-center-info" style="display:none;margin-bottom:12px">
+                        <div style="font-size:13px;color:var(--text-dim)">
+                            Center: <strong id="radius-center-name" style="color:var(--text)"></strong>
+                            <span id="radius-center-coords" style="margin-left:8px"></span>
+                        </div>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label>Radius: <strong id="radius-value-label">25</strong> miles</label>
-                    <input type="range" id="radius-slider" min="1" max="150" value="25" step="1"
-                        style="width:100%;accent-color:var(--accent);cursor:pointer"
-                        oninput="updateRadiusLabel()" onchange="applyRadiusFilter()">
-                    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-top:4px">
-                        <span>1 mi</span><span>50 mi</span><span>100 mi</span><span>150 mi</span>
+                    <div class="form-group" style="margin-bottom:8px">
+                        <label>Radius: <strong id="radius-value-label">25</strong> miles</label>
+                        <input type="range" id="radius-slider" min="1" max="150" value="25" step="1"
+                            style="width:100%;accent-color:var(--accent);cursor:pointer"
+                            oninput="updateRadiusLabel()" onchange="applyRadiusFilter()">
+                        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-top:4px">
+                            <span>1 mi</span><span>50 mi</span><span>100 mi</span><span>150 mi</span>
+                        </div>
                     </div>
-                </div>
-                <div class="btn-group">
                     <button class="btn btn-outline btn-sm" onclick="clearRadiusFilter()">Clear Filter (show all)</button>
+                    <div id="radius-filter-status" style="margin-top:8px;font-size:13px;color:var(--text-dim);display:none"></div>
                 </div>
-                <div id="radius-filter-status" style="margin-top:12px;font-size:13px;color:var(--text-dim);display:none"></div>
             </div>
         </div>
+
+        <!-- Full-width town list and map below -->
         <div class="card">
             <h2>Towns <span id="town-count" style="color:var(--text-dim);font-weight:400"></span></h2>
             <div id="towns-list"></div>
@@ -876,8 +871,10 @@ function switchPage(pageName) {
     }
     if (pageName === 'rankings') populateResultsFilter();
     if (pageName === 'projects') renderProjects();
-    if (pageName === 'categories') renderCategories();
-    if (pageName === 'towns') renderTowns();
+    if (pageName === 'setup') {
+        renderCategories();
+        renderTowns();
+    }
 }
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -929,7 +926,7 @@ function selectProject(id) {
     data.activeProjectId = id;
     saveData(data);
     updateProjectBar();
-    switchPage('categories');
+    switchPage('setup');
 }
 
 function editProject(id) {
