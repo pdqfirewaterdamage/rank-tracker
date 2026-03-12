@@ -462,6 +462,7 @@
         <button class="nav-tab active" data-page="projects">Projects</button>
         <button class="nav-tab" data-page="setup" id="tab-setup">Setup</button>
         <button class="nav-tab" data-page="rankings" id="tab-rankings">Rankings</button>
+        <button class="nav-tab" data-page="serp" id="tab-serp">SERP</button>
     </div>
 </header>
 
@@ -676,6 +677,30 @@
         </div>
     </div>
 
+    <!-- SERP PAGE -->
+    <div class="page" id="page-serp">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+            <h2 style="font-size:18px;margin:0">Search Engine Results</h2>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <label style="font-size:13px;color:var(--text-dim)">Category:</label>
+                <select id="serp-cat-filter" onchange="renderSerpPage()" style="width:auto;min-width:180px">
+                    <option value="all">All Categories</option>
+                </select>
+                <label style="font-size:13px;color:var(--text-dim)">Town:</label>
+                <select id="serp-town-filter" onchange="renderSerpPage()" style="width:auto;min-width:180px">
+                    <option value="all">All Towns</option>
+                </select>
+            </div>
+        </div>
+        <div id="serp-results-container">
+            <div class="empty-state">
+                <div class="icon">&#x1F50D;</div>
+                <h3>No SERP data yet</h3>
+                <p>Run a scan from the Rankings tab to see search results here</p>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <!-- Remap Town Modal -->
@@ -864,6 +889,10 @@ function switchPage(pageName) {
     if (pageName === 'rankings') {
         populateResultsFilter();
         setTimeout(() => renderCategoryMaps(), 100);
+    }
+    if (pageName === 'serp') {
+        populateSerpFilters();
+        renderSerpPage();
     }
     if (pageName === 'projects') renderProjects();
     if (pageName === 'setup') {
@@ -2124,6 +2153,105 @@ function showSearchPreview(keyword, townId, catId) {
 
     document.getElementById('zoom-level-label').textContent = '100%';
     document.getElementById('search-preview-modal').classList.add('open');
+}
+
+// ============================================================
+// SERP PAGE — show all search results
+// ============================================================
+function populateSerpFilters() {
+    const proj = getActiveProject();
+    if (!proj) return;
+
+    const catSel = document.getElementById('serp-cat-filter');
+    catSel.innerHTML = '<option value="all">All Categories</option>' +
+        proj.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+    const townSel = document.getElementById('serp-town-filter');
+    const visibleTowns = getVisibleTowns();
+    townSel.innerHTML = '<option value="all">All Towns</option>' +
+        visibleTowns.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+}
+
+function renderSerpPage() {
+    const container = document.getElementById('serp-results-container');
+    const proj = getActiveProject();
+    if (!proj) return;
+
+    const catFilter = document.getElementById('serp-cat-filter').value;
+    const townFilter = document.getElementById('serp-town-filter').value;
+
+    const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
+    let rankings = proj.rankings.filter(r => visibleTownIds.has(r.townId));
+    if (catFilter !== 'all') rankings = rankings.filter(r => r.categoryId === catFilter);
+    if (townFilter !== 'all') rankings = rankings.filter(r => r.townId === townFilter);
+
+    if (rankings.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F50D;</div><h3>No SERP data</h3><p>Run a scan from the Rankings tab first</p></div>';
+        return;
+    }
+
+    const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
+    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+
+    let html = '';
+    for (const ranking of rankings) {
+        const town = proj.towns.find(t => t.id === ranking.townId);
+        const cat = proj.categories.find(c => c.id === ranking.categoryId);
+        const topResults = ranking.topResults || [];
+        const query = ranking.query || (ranking.keyword + ' ' + (town ? town.name : ''));
+        const googleUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+        const rankClass = ranking.rank >= 20 ? 'rank-red' : ranking.rank <= 3 ? 'rank-green' : ranking.rank <= 6 ? 'rank-orange' : 'rank-red';
+        const rankDisplay = ranking.rank >= 20 ? '20+' : ranking.rank;
+
+        html += `<div class="card" style="margin-bottom:16px">`;
+
+        // Header bar with query, rank badge, category, town
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+                <span class="rank-badge ${rankClass}">${rankDisplay}</span>
+                <div style="min-width:0">
+                    <div style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(query)}</div>
+                    <div style="font-size:12px;color:var(--text-dim)">${cat ? esc(cat.name) : ''} &middot; ${town ? esc(town.name) : ''} &middot; ${new Date(ranking.scannedAt).toLocaleString()}</div>
+                </div>
+            </div>
+            <a href="${googleUrl}" target="_blank" class="btn btn-outline btn-sm" style="white-space:nowrap">Open in Google</a>
+        </div>`;
+
+        if (ranking.screenshot) {
+            html += `<div style="background:white;border-radius:8px;overflow:hidden;max-height:500px;overflow-y:auto">
+                <img src="${ranking.screenshot}" style="width:100%;height:auto;display:block" alt="SERP for ${esc(query)}">
+            </div>`;
+        } else if (topResults.length > 0) {
+            html += `<div style="background:white;border-radius:8px;overflow:hidden;padding:16px 20px;max-height:500px;overflow-y:auto">`;
+            for (const result of topResults) {
+                const isMatch = searchTerms.some(term =>
+                    result.title.toLowerCase().includes(term) ||
+                    result.link.toLowerCase().includes(term) ||
+                    result.snippet.toLowerCase().includes(term)
+                );
+                let domain = '';
+                try { domain = new URL(result.link).hostname; } catch(e) { domain = result.link; }
+                const highlight = isMatch ? 'border-left:3px solid #00b894;padding-left:10px;background:#f0fdf9;border-radius:4px;padding-top:6px;padding-bottom:6px;padding-right:6px' : '';
+
+                html += `<div style="margin-bottom:16px;max-width:600px;${highlight}">
+                    ${isMatch ? `<div style="font-size:10px;font-weight:700;color:#00b894;text-transform:uppercase;margin-bottom:2px">&#x2713; YOUR BUSINESS — RANK #${result.pos}</div>` : ''}
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                        <img src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=16" width="14" height="14" style="border-radius:50%" onerror="this.style.display='none'">
+                        <span style="font-size:11px;color:#202124">${esc(domain)}</span>
+                    </div>
+                    <a href="${esc(result.link)}" target="_blank" style="font-size:16px;color:#1a0dab;text-decoration:none;line-height:1.3;display:block;margin-bottom:2px">${esc(result.title)}</a>
+                    <div style="font-size:13px;color:#4d5156;line-height:1.5">${esc(result.snippet)}</div>
+                </div>`;
+            }
+            html += `</div>`;
+        } else {
+            html += `<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px">No SERP data stored for this query</div>`;
+        }
+
+        html += `</div>`;
+    }
+
+    container.innerHTML = html;
 }
 
 // ============================================================
