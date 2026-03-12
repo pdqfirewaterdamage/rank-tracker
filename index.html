@@ -1959,10 +1959,15 @@ async function runScan() {
             }
 
             const result = await resp.json();
+            // Debug: log all top-level keys from first result to see what Serper returns
+            if (done === 0) {
+                console.log('Serper response keys:', Object.keys(result));
+                console.log('Full first response:', JSON.stringify(result).slice(0, 3000));
+            }
             const organic = result.organic || [];
             const ads = result.ads || [];
-            const places = result.places || result.localPack || [];
-            const lsa = result.localServiceAds || [];
+            const places = result.places || result.localPack || result.local || [];
+            const lsa = result.localServiceAds || result.serviceAds || [];
 
             // Helper to find our rank in a result list
             function findRankIn(list) {
