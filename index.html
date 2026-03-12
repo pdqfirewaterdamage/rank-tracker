@@ -17,8 +17,8 @@
             --border: #243a5e;
             --text: #e8ecf4;
             --text-dim: #8a9ab5;
-            --accent: #e8732a;
-            --accent-hover: #f5882f;
+            --accent: #43a047;
+            --accent-hover: #4CAF50;
             --green: #00b894;
             --orange: #fdcb6e;
             --red: #e17055;
@@ -34,24 +34,24 @@
 
         header {
             background: linear-gradient(135deg, #0d1f3c 0%, #142d52 100%);
-            border-bottom: 2px solid var(--accent);
-            padding: 12px 24px;
+            border-bottom: 3px solid var(--accent);
+            padding: 18px 28px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 16px;
         }
 
         .header-brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 16px;
         }
 
         .header-brand img {
-            height: 40px;
-            border-radius: 6px;
+            height: 56px;
+            border-radius: 8px;
         }
 
         .header-brand .brand-text {
@@ -60,18 +60,19 @@
         }
 
         .header-brand .brand-name {
-            font-size: 18px;
+            font-size: 24px;
             font-weight: 700;
             color: white;
             line-height: 1.2;
         }
 
         .header-brand .brand-sub {
-            font-size: 11px;
+            font-size: 12px;
             color: var(--accent);
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            margin-top: 2px;
         }
 
         header h1 {
@@ -203,7 +204,7 @@
         }
 
         .btn-primary { background: var(--accent); color: white; font-weight: 600; }
-        .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(232,115,42,0.3); }
+        .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(67,160,71,0.3); }
         .btn-danger { background: var(--danger); color: white; }
         .btn-danger:hover { opacity: 0.9; }
         .btn-sm { padding: 6px 14px; font-size: 13px; }
@@ -461,7 +462,6 @@
         <button class="nav-tab active" data-page="projects">Projects</button>
         <button class="nav-tab" data-page="setup" id="tab-setup">Setup</button>
         <button class="nav-tab" data-page="rankings" id="tab-rankings">Rankings</button>
-        <button class="nav-tab" data-page="heatmaps" id="tab-heatmaps">Heatmaps</button>
     </div>
 </header>
 
@@ -614,47 +614,52 @@
         </div>
     </div>
 
-    <!-- RANKINGS PAGE -->
+    <!-- RANKINGS PAGE (combined with heatmaps) -->
     <div class="page" id="page-rankings">
-        <div class="card">
-            <h2>API Settings</h2>
-            <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">
-                Enter your <a href="https://serper.dev" target="_blank" style="color:var(--accent)">Serper.dev</a> API key to pull real Google rankings. Your key is stored only in your browser — never uploaded.
-            </p>
-            <div class="form-group" style="margin-bottom:8px">
-                <div style="display:flex;gap:8px">
-                    <input type="password" id="serper-api-key" placeholder="Paste your Serper API key" style="flex:1">
-                    <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Save Key</button>
+        <!-- Compact scan header -->
+        <div class="grid-2" style="margin-bottom:20px">
+            <div class="card" style="margin-bottom:0">
+                <h2>API Settings</h2>
+                <div style="display:flex;gap:8px;margin-bottom:6px">
+                    <input type="password" id="serper-api-key" placeholder="Serper API key" style="flex:1">
+                    <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Save</button>
                     <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility()">Show</button>
                 </div>
+                <div id="api-key-status" style="font-size:12px;color:var(--text-dim)"></div>
             </div>
-            <div id="api-key-status" style="font-size:12px;color:var(--text-dim)"></div>
-        </div>
-
-        <div class="card">
-            <h2>Run Ranking Scan</h2>
-            <p style="color:var(--text-dim);font-size:14px;margin-bottom:12px">
-                Searches Google via Serper API for each keyword + town and finds your ranking position.
-            </p>
-            <div class="form-group">
-                <label>Your Business Name / Domain (to find in results)</label>
-                <input type="text" id="business-domain" placeholder="e.g., pdqrestoration.com or PDQ Fire &amp; Water Damage">
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-primary" id="run-scan-btn" onclick="runScan()">Run Full Scan</button>
-                <button class="btn btn-outline" onclick="clearRankings()">Clear All Rankings</button>
-            </div>
-            <div class="status-bar" id="scan-status">
-                <div class="spinner"></div>
-                <span id="scan-status-text">Scanning...</span>
-            </div>
-            <div class="progress-bar" id="scan-progress" style="display:none">
-                <div class="progress-fill" id="scan-progress-fill" style="width:0%"></div>
+            <div class="card" style="margin-bottom:0">
+                <h2>Run Scan</h2>
+                <div style="display:flex;gap:8px;align-items:end">
+                    <div style="flex:1">
+                        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Business Name / Domain</label>
+                        <input type="text" id="business-domain" placeholder="e.g., pdqrestoration.com">
+                    </div>
+                    <button class="btn btn-primary btn-sm" id="run-scan-btn" onclick="runScan()" style="height:40px;white-space:nowrap">Run Scan</button>
+                    <button class="btn btn-outline btn-sm" onclick="clearRankings()" style="height:40px">Clear</button>
+                </div>
+                <div class="status-bar" id="scan-status">
+                    <div class="spinner"></div>
+                    <span id="scan-status-text">Scanning...</span>
+                </div>
+                <div class="progress-bar" id="scan-progress" style="display:none">
+                    <div class="progress-fill" id="scan-progress-fill" style="width:0%"></div>
+                </div>
             </div>
         </div>
 
+        <!-- Legend -->
+        <div class="legend" style="margin-bottom:16px">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Rank 1-3</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Rank 4-6</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Rank 7+</div>
+        </div>
+
+        <!-- Category heatmaps with results side by side -->
+        <div id="category-maps-container"></div>
+
+        <!-- Full results table -->
         <div class="card">
-            <h2>Results</h2>
+            <h2>All Results</h2>
             <div class="heatmap-controls">
                 <label style="font-size:13px;color:var(--text-dim)">Filter by category:</label>
                 <select id="results-cat-filter" onchange="renderResults()">
@@ -669,16 +674,6 @@
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- HEATMAPS PAGE -->
-    <div class="page" id="page-heatmaps">
-        <div class="legend" style="margin-bottom:20px">
-            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Rank 1-3</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Rank 4-6</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Rank 7+</div>
-        </div>
-        <div id="category-maps-container"></div>
     </div>
 
 </div>
@@ -866,10 +861,10 @@ function switchPage(pageName) {
     if (tab) tab.classList.add('active');
     document.getElementById('page-' + pageName).classList.add('active');
 
-    if (pageName === 'heatmaps') {
+    if (pageName === 'rankings') {
+        populateResultsFilter();
         setTimeout(() => renderCategoryMaps(), 100);
     }
-    if (pageName === 'rankings') populateResultsFilter();
     if (pageName === 'projects') renderProjects();
     if (pageName === 'setup') {
         renderCategories();
@@ -2158,18 +2153,23 @@ function renderCategoryMaps() {
     categoryMaps = {};
     categoryMarkers = {};
 
-    // Build HTML for each category with its own keyword selector
+    // Build HTML for each category: heatmap left, results right
     container.innerHTML = proj.categories.map(cat => `
         <div class="card">
-            <h2>${esc(cat.name)}</h2>
-            <div class="heatmap-controls">
-                <label style="font-size:13px;color:var(--text-dim)">Keyword:</label>
-                <select id="kw-select-${cat.id}" onchange="updateCategoryMap('${cat.id}')">
-                    <option value="__avg__">Average (all keywords)</option>
-                    ${cat.keywords.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('')}
-                </select>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                <h2 style="margin:0">${esc(cat.name)}</h2>
+                <div class="heatmap-controls" style="margin:0">
+                    <label style="font-size:13px;color:var(--text-dim)">Keyword:</label>
+                    <select id="kw-select-${cat.id}" onchange="updateCategoryMap('${cat.id}')">
+                        <option value="__avg__">Average (all keywords)</option>
+                        ${cat.keywords.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('')}
+                    </select>
+                </div>
             </div>
-            <div class="map-container"><div id="cat-map-${cat.id}" style="height:100%"></div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div class="map-container" style="height:450px"><div id="cat-map-${cat.id}" style="height:100%"></div></div>
+                <div id="cat-results-${cat.id}" style="max-height:450px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;background:var(--bg)"></div>
+            </div>
         </div>
     `).join('');
 
@@ -2190,6 +2190,7 @@ function renderCategoryMaps() {
             categoryMarkers[cat.id] = [];
 
             populateCategoryMap(cat.id, '__avg__');
+            renderCategoryResults(cat.id, '__avg__');
 
             const vt = getVisibleTowns();
             if (vt.length > 0) {
@@ -2203,6 +2204,41 @@ function updateCategoryMap(catId) {
     const sel = document.getElementById('kw-select-' + catId);
     if (!sel) return;
     populateCategoryMap(catId, sel.value);
+    renderCategoryResults(catId, sel.value);
+}
+
+function renderCategoryResults(catId, kwFilter) {
+    const container = document.getElementById('cat-results-' + catId);
+    if (!container) return;
+    const proj = getActiveProject();
+    if (!proj) return;
+
+    const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
+    let rankings = proj.rankings.filter(r => r.categoryId === catId && visibleTownIds.has(r.townId));
+    if (kwFilter !== '__avg__') rankings = rankings.filter(r => r.keyword === kwFilter);
+
+    if (rankings.length === 0) {
+        container.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">No results for this category</div>';
+        return;
+    }
+
+    let html = '<table style="font-size:13px"><thead><tr><th>Town</th><th>Keyword</th><th>Rank</th><th></th></tr></thead><tbody>';
+    for (const r of rankings) {
+        const town = proj.towns.find(t => t.id === r.townId);
+        if (!town) continue;
+        const cat = proj.categories.find(c => c.id === r.categoryId);
+        const isNotFound = r.rank >= 20;
+        const rankClass = isNotFound ? 'rank-red' : r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
+        const rankDisplay = isNotFound ? '20+' : r.rank;
+        html += `<tr>
+            <td>${esc(town.name)}</td>
+            <td>${esc(r.keyword)}</td>
+            <td><span class="rank-badge ${rankClass}" style="width:28px;height:28px;font-size:12px">${rankDisplay}</span></td>
+            <td><button class="btn btn-sm btn-outline" style="padding:3px 8px;font-size:11px" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${town.id}', '${cat ? cat.id : ''}')">View</button></td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 function populateCategoryMap(catId, kwFilter) {
