@@ -477,14 +477,48 @@
             <div class="card">
                 <h2>Add Towns</h2>
                 <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
-                    Paste a list of town names (one per line). Coordinates will be looked up automatically.<br>
-                    You can also use <code>name,lat,lng</code> format if you have coordinates.
+                    Paste a list of town names (one per line). The state is appended automatically for accurate geocoding.
                 </p>
-                <div class="form-group">
-                    <label>Town List (one per line)</label>
-                    <textarea id="towns-paste-input" style="min-height:200px" placeholder="Manchester&#10;Birmingham&#10;Leeds&#10;Liverpool&#10;Bristol"></textarea>
+
+                <!-- Single vs Multi state toggle -->
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                    <label style="font-size:14px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:8px">
+                        <input type="checkbox" id="multi-state-toggle" onchange="toggleMultiState()"
+                            style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+                        Towns in multiple states
+                    </label>
                 </div>
-                <button class="btn btn-primary" onclick="addTownsFromList()">Add Towns</button>
+
+                <!-- Single state mode -->
+                <div id="single-state-section">
+                    <div class="form-group">
+                        <label>State</label>
+                        <select id="single-state-select">
+                            <option value="">Select a state...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Town List (one per line)</label>
+                        <textarea id="towns-paste-input" style="min-height:200px" placeholder="Springfield&#10;Shelbyville&#10;Ogdenville"></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="addTownsFromList()">Add Towns</button>
+                </div>
+
+                <!-- Multi state mode -->
+                <div id="multi-state-section" style="display:none">
+                    <div class="form-group">
+                        <label>Add a state</label>
+                        <div style="display:flex;gap:8px">
+                            <select id="add-state-select" style="flex:1">
+                                <option value="">Select a state...</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="addStateBox()">Add State</button>
+                        </div>
+                    </div>
+                    <div id="multi-state-boxes"></div>
+                    <button class="btn btn-primary" onclick="addTownsMultiState()" id="add-multi-btn" style="display:none;margin-top:12px">Add All Towns</button>
+                </div>
+
                 <div class="status-bar" id="geocode-status">
                     <div class="spinner"></div>
                     <span id="geocode-status-text">Geocoding...</span>
@@ -923,17 +957,76 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 // ============================================================
 // TOWNS (scoped to active project)
 // ============================================================
-async function addTownsFromList() {
-    const proj = requireProject();
-    if (!proj) return;
+const US_STATES = [
+    'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
+    'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
+    'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
+    'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire',
+    'New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio',
+    'Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota',
+    'Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia',
+    'Wisconsin','Wyoming'
+];
 
-    const raw = document.getElementById('towns-paste-input').value.trim();
-    if (!raw) return alert('Paste at least one town name');
+// Populate state dropdowns on load
+function populateStateDropdowns() {
+    const opts = US_STATES.map(s => `<option value="${s}">${s}</option>`).join('');
+    document.getElementById('single-state-select').innerHTML = '<option value="">Select a state...</option>' + opts;
+    document.getElementById('add-state-select').innerHTML = '<option value="">Select a state...</option>' + opts;
+}
+populateStateDropdowns();
 
-    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-    // Skip header row if present
-    const filtered = lines.filter(l => !/^name/i.test(l));
-    if (filtered.length === 0) return alert('No town names found');
+function toggleMultiState() {
+    const isMulti = document.getElementById('multi-state-toggle').checked;
+    document.getElementById('single-state-section').style.display = isMulti ? 'none' : 'block';
+    document.getElementById('multi-state-section').style.display = isMulti ? 'block' : 'none';
+}
+
+// Multi-state: add a state box
+let multiStateBoxes = [];
+
+function addStateBox() {
+    const sel = document.getElementById('add-state-select');
+    const state = sel.value;
+    if (!state) return alert('Select a state');
+    if (multiStateBoxes.includes(state)) return alert('That state is already added');
+
+    multiStateBoxes.push(state);
+    sel.value = '';
+    renderMultiStateBoxes();
+}
+
+function removeStateBox(state) {
+    multiStateBoxes = multiStateBoxes.filter(s => s !== state);
+    renderMultiStateBoxes();
+}
+
+function renderMultiStateBoxes() {
+    const container = document.getElementById('multi-state-boxes');
+    const addBtn = document.getElementById('add-multi-btn');
+
+    if (multiStateBoxes.length === 0) {
+        container.innerHTML = '';
+        addBtn.style.display = 'none';
+        return;
+    }
+
+    addBtn.style.display = 'inline-flex';
+    container.innerHTML = multiStateBoxes.map(state => `
+        <div class="card" style="margin-top:12px;margin-bottom:0;background:var(--surface2);padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <strong>${esc(state)}</strong>
+                <button class="btn btn-sm btn-danger" onclick="removeStateBox('${esc(state)}')">&#x2715;</button>
+            </div>
+            <textarea id="multi-towns-${state.replace(/\s/g, '_')}" style="min-height:120px;width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:inherit;resize:vertical" placeholder="Town names for ${state} (one per line)"></textarea>
+        </div>
+    `).join('');
+}
+
+// Geocode a list of {name, state} entries
+async function geocodeTownList(entries) {
+    const proj = getActiveProject();
+    if (!proj) return 0;
 
     const statusBar = document.getElementById('geocode-status');
     const statusText = document.getElementById('geocode-status-text');
@@ -947,18 +1040,18 @@ async function addTownsFromList() {
     let added = 0;
     let failed = [];
 
-    for (let i = 0; i < filtered.length; i++) {
-        const line = filtered[i];
-        const parts = line.split(',').map(p => p.trim());
+    for (let i = 0; i < entries.length; i++) {
+        const { name, state } = entries[i];
+        const parts = name.split(',').map(p => p.trim());
 
-        statusText.textContent = `Processing ${i + 1}/${filtered.length}: ${parts[0]}...`;
-        progressFill.style.width = ((i / filtered.length) * 100) + '%';
+        statusText.textContent = `Processing ${i + 1}/${entries.length}: ${parts[0]}${state ? ', ' + state : ''}...`;
+        progressFill.style.width = ((i / entries.length) * 100) + '%';
 
         // If line has name,lat,lng format
         if (parts.length >= 3 && !isNaN(parseFloat(parts[1])) && !isNaN(parseFloat(parts[2]))) {
             proj.towns.push({
                 id: Date.now().toString() + '_' + i,
-                name: parts[0],
+                name: parts[0] + (state ? ', ' + state : ''),
                 lat: parseFloat(parts[1]),
                 lng: parseFloat(parts[2])
             });
@@ -966,29 +1059,29 @@ async function addTownsFromList() {
             continue;
         }
 
-        // Otherwise geocode the town name
-        const name = parts[0];
+        // Geocode with state appended
+        const query = state ? `${parts[0]}, ${state}, USA` : parts[0];
+        const displayName = state ? `${parts[0]}, ${state}` : parts[0];
         try {
-            const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name)}&limit=1`, {
+            const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`, {
                 headers: { 'User-Agent': 'LocalRankTracker/1.0' }
             });
             const results = await resp.json();
             if (results.length > 0) {
                 proj.towns.push({
                     id: Date.now().toString() + '_' + i,
-                    name,
+                    name: displayName,
                     lat: parseFloat(results[0].lat),
                     lng: parseFloat(results[0].lon)
                 });
                 added++;
             } else {
-                failed.push(name);
+                failed.push(displayName);
             }
-            // Respect Nominatim rate limit (1 req/sec)
             await new Promise(r => setTimeout(r, 1100));
         } catch (e) {
-            console.error('Geocode error for', name, e);
-            failed.push(name);
+            console.error('Geocode error for', displayName, e);
+            failed.push(displayName);
         }
     }
 
@@ -997,12 +1090,60 @@ async function addTownsFromList() {
 
     saveData(data);
     renderTowns();
-    document.getElementById('towns-paste-input').value = '';
 
     setTimeout(() => {
         statusBar.classList.remove('visible');
         progressBar.style.display = 'none';
     }, 3000);
+
+    return added;
+}
+
+// Single state mode
+async function addTownsFromList() {
+    const proj = requireProject();
+    if (!proj) return;
+
+    const state = document.getElementById('single-state-select').value;
+    if (!state) return alert('Select a state first');
+
+    const raw = document.getElementById('towns-paste-input').value.trim();
+    if (!raw) return alert('Paste at least one town name');
+
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean).filter(l => !/^name/i.test(l));
+    if (lines.length === 0) return alert('No town names found');
+
+    const entries = lines.map(name => ({ name, state }));
+    await geocodeTownList(entries);
+    document.getElementById('towns-paste-input').value = '';
+}
+
+// Multi state mode
+async function addTownsMultiState() {
+    const proj = requireProject();
+    if (!proj) return;
+
+    if (multiStateBoxes.length === 0) return alert('Add at least one state');
+
+    const entries = [];
+    for (const state of multiStateBoxes) {
+        const textarea = document.getElementById('multi-towns-' + state.replace(/\s/g, '_'));
+        if (!textarea) continue;
+        const lines = textarea.value.trim().split('\n').map(l => l.trim()).filter(Boolean).filter(l => !/^name/i.test(l));
+        for (const name of lines) {
+            entries.push({ name, state });
+        }
+    }
+
+    if (entries.length === 0) return alert('Enter at least one town name in a state box');
+
+    await geocodeTownList(entries);
+
+    // Clear all textareas
+    for (const state of multiStateBoxes) {
+        const textarea = document.getElementById('multi-towns-' + state.replace(/\s/g, '_'));
+        if (textarea) textarea.value = '';
+    }
 }
 
 // ============================================================
