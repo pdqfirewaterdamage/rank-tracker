@@ -1789,6 +1789,15 @@ async function runScan() {
     let done = 0;
     let errors = 0;
 
+    // Check if screenshot server is available
+    let screenshotServerAvailable = false;
+    try {
+        const healthResp = await fetch('http://localhost:3456/health', { signal: AbortSignal.timeout(2000) });
+        if (healthResp.ok) screenshotServerAvailable = true;
+    } catch (e) {
+        console.log('Screenshot server not available, skipping screenshots');
+    }
+
     // Search terms to match against (lowercase)
     const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
@@ -1862,6 +1871,25 @@ async function runScan() {
                         snippet: e.snippet || ''
                     }));
 
+                    // Try to capture screenshot from local server
+                    let screenshot = '';
+                    if (screenshotServerAvailable) {
+                        try {
+                            statusText.textContent = `Screenshotting "${query}" (${done + 1}/${totalTasks})...`;
+                            const ssResp = await fetch('http://localhost:3456/screenshot', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ query })
+                            });
+                            if (ssResp.ok) {
+                                const ssData = await ssResp.json();
+                                screenshot = ssData.screenshot || '';
+                            }
+                        } catch (e) {
+                            console.warn('Screenshot failed for', query, e.message);
+                        }
+                    }
+
                     proj.rankings.push({
                         townId: town.id,
                         categoryId: cat.id,
@@ -1871,6 +1899,7 @@ async function runScan() {
                         foundTitle,
                         query,
                         topResults,
+                        screenshot,
                         scannedAt: new Date().toISOString()
                     });
 
@@ -2018,7 +2047,16 @@ function showSearchPreview(keyword, townId, catId) {
     const resultsContainer = document.getElementById('search-preview-results');
     const topResults = ranking.topResults || [];
 
-    if (topResults.length === 0) {
+    if (ranking.screenshot) {
+        // Show actual screenshot
+        resultsContainer.innerHTML = `
+            <div style="background:white;text-align:center;padding:10px">
+                <img src="${ranking.screenshot}" style="max-width:100%;height:auto;display:block;margin:0 auto" alt="Google search results for ${esc(query)}">
+            </div>
+        `;
+        resultsContainer.style.transform = 'scale(1)';
+        resultsContainer.style.width = '100%';
+    } else if (topResults.length === 0) {
         resultsContainer.innerHTML = '<div style="padding:30px;text-align:center;color:#666;font-family:Arial,sans-serif">No stored results. Re-run the scan to capture search results.</div>';
         resultsContainer.style.transform = 'scale(1)';
         resultsContainer.style.width = '100%';
