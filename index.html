@@ -679,6 +679,26 @@
 
     <!-- SERP PAGE -->
     <div class="page" id="page-serp">
+        <!-- Title Mismatch Errors -->
+        <div id="serp-errors-section" style="display:none;margin-bottom:20px">
+            <div class="card" style="border-color:var(--red);border-width:2px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+                    <h2 style="margin:0;color:var(--red)">Title Tag Mismatches</h2>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <span id="serp-errors-count" style="font-size:13px;color:var(--text-dim)"></span>
+                        <button class="btn btn-outline btn-sm" onclick="toggleCompletedErrors()">
+                            <span id="toggle-completed-label">Show Completed</span>
+                        </button>
+                    </div>
+                </div>
+                <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
+                    These pages rank for your business but have title tags containing terms that don't match the search keyword.
+                    Update the title tag, then submit to Google Search Console for re-indexing.
+                </p>
+                <div id="serp-errors-list"></div>
+            </div>
+        </div>
+
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
             <h2 style="font-size:18px;margin:0">Search Engine Results</h2>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -2172,6 +2192,168 @@ function populateSerpFilters() {
         visibleTowns.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
 }
 
+// ---- Title mismatch detection ----
+const GSC_COMPLETED_KEY = 'rankTracker_gscCompleted';
+let showCompletedErrors = false;
+
+function getGscCompleted() {
+    try { return JSON.parse(localStorage.getItem(GSC_COMPLETED_KEY) || '{}'); } catch(e) { return {}; }
+}
+function setGscCompleted(key, done) {
+    const data = getGscCompleted();
+    if (done) data[key] = new Date().toISOString();
+    else delete data[key];
+    localStorage.setItem(GSC_COMPLETED_KEY, JSON.stringify(data));
+}
+
+function toggleCompletedErrors() {
+    showCompletedErrors = !showCompletedErrors;
+    document.getElementById('toggle-completed-label').textContent = showCompletedErrors ? 'Hide Completed' : 'Show Completed';
+    renderSerpErrors();
+}
+
+function markGscCompleted(key, checkbox) {
+    setGscCompleted(key, checkbox.checked);
+    if (!showCompletedErrors) renderSerpErrors();
+}
+
+function openInGsc(url) {
+    // Opens GSC URL Inspection for this URL
+    const gscUrl = 'https://search.google.com/search-console/inspect?resource_id=' +
+        encodeURIComponent(url) + '&id=' + encodeURIComponent(url);
+    window.open(gscUrl, '_blank');
+}
+
+function detectTitleMismatches() {
+    const proj = getActiveProject();
+    if (!proj) return [];
+
+    const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
+    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    const mismatches = [];
+
+    // Words that commonly appear together but indicate a mismatch when the keyword doesn't include them
+    // e.g., title says "Fire & Water Damage" but keyword is just "Water Damage Restoration"
+    const mismatchTermPairs = [
+        { extra: 'fire', related: ['water', 'damage', 'restoration'] },
+        { extra: 'water', related: ['fire', 'damage', 'restoration'] },
+        { extra: 'mold', related: ['water', 'damage', 'restoration', 'remediation'] },
+        { extra: 'storm', related: ['water', 'damage', 'restoration'] },
+        { extra: 'flood', related: ['water', 'damage', 'restoration'] },
+        { extra: 'smoke', related: ['fire', 'damage', 'restoration'] },
+    ];
+
+    for (const ranking of proj.rankings) {
+        if (!ranking.foundUrl || !ranking.foundTitle) continue;
+        // Only check our own pages
+        const isOurs = searchTerms.some(term =>
+            ranking.foundUrl.toLowerCase().includes(term) ||
+            ranking.foundTitle.toLowerCase().includes(term)
+        );
+        if (!isOurs) continue;
+
+        const titleLower = ranking.foundTitle.toLowerCase();
+        const kwLower = ranking.keyword.toLowerCase();
+        const kwWords = kwLower.split(/\s+/);
+
+        const issues = [];
+        for (const pair of mismatchTermPairs) {
+            // Title contains the extra term, but the keyword does NOT contain it
+            if (titleLower.includes(pair.extra) && !kwWords.includes(pair.extra)) {
+                // Keyword should contain at least one related term to be relevant
+                const hasRelated = pair.related.some(r => kwLower.includes(r));
+                if (hasRelated) {
+                    issues.push(`Title mentions "${pair.extra}" but keyword "${ranking.keyword}" does not`);
+                }
+            }
+        }
+
+        if (issues.length > 0) {
+            const town = proj.towns.find(t => t.id === ranking.townId);
+            const cat = proj.categories.find(c => c.id === ranking.categoryId);
+            mismatches.push({
+                key: ranking.townId + '|' + ranking.categoryId + '|' + ranking.keyword,
+                keyword: ranking.keyword,
+                title: ranking.foundTitle,
+                url: ranking.foundUrl,
+                rank: ranking.rank,
+                town: town ? town.name : '',
+                category: cat ? cat.name : '',
+                issues
+            });
+        }
+    }
+
+    // Dedupe by URL + keyword (same page might rank in multiple towns)
+    const seen = new Set();
+    return mismatches.filter(m => {
+        const k = m.url + '|' + m.keyword;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+}
+
+function renderSerpErrors() {
+    const section = document.getElementById('serp-errors-section');
+    const listEl = document.getElementById('serp-errors-list');
+    const countEl = document.getElementById('serp-errors-count');
+
+    const mismatches = detectTitleMismatches();
+    const completed = getGscCompleted();
+
+    if (mismatches.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = 'block';
+
+    const pending = mismatches.filter(m => !completed[m.key]);
+    const done = mismatches.filter(m => completed[m.key]);
+
+    countEl.textContent = `${pending.length} pending${done.length > 0 ? `, ${done.length} completed` : ''}`;
+
+    const toShow = showCompletedErrors ? mismatches : pending;
+
+    if (toShow.length === 0) {
+        listEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">All issues resolved! Toggle "Show Completed" to review.</div>';
+        return;
+    }
+
+    let html = '';
+    for (const m of toShow) {
+        const isDone = !!completed[m.key];
+        const rankClass = m.rank >= 20 ? 'rank-red' : m.rank <= 3 ? 'rank-green' : m.rank <= 6 ? 'rank-orange' : 'rank-red';
+        const doneStyle = isDone ? 'opacity:0.5;' : '';
+        const escapedKey = esc(m.key).replace(/'/g, "\\'");
+
+        html += `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg);${doneStyle}">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onchange="markGscCompleted('${escapedKey}', this)"
+                style="width:20px;height:20px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;margin-top:2px"
+                title="Mark as submitted to GSC">
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+                    <span class="rank-badge ${rankClass}" style="width:26px;height:26px;font-size:11px">${m.rank >= 20 ? '20+' : m.rank}</span>
+                    <strong style="font-size:14px">${esc(m.keyword)}</strong>
+                    <span style="font-size:12px;color:var(--text-dim)">${esc(m.category)} &middot; ${esc(m.town)}</span>
+                </div>
+                <div style="font-size:13px;margin-bottom:4px">
+                    <span style="color:var(--red);font-weight:600">Title:</span>
+                    <span style="color:var(--text)">${esc(m.title)}</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;word-break:break-all">${esc(m.url)}</div>
+                ${m.issues.map(i => `<div style="font-size:12px;color:var(--orange);margin-bottom:2px">&#x26A0; ${esc(i)}</div>`).join('')}
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openInGsc('${esc(m.url).replace(/'/g, "\\'")}')" style="white-space:nowrap;flex-shrink:0">
+                Submit to GSC
+            </button>
+        </div>`;
+    }
+
+    listEl.innerHTML = html;
+}
+
 function renderSerpPage() {
     const container = document.getElementById('serp-results-container');
     const proj = getActiveProject();
@@ -2252,6 +2434,9 @@ function renderSerpPage() {
     }
 
     container.innerHTML = html;
+
+    // Also render title mismatch errors
+    renderSerpErrors();
 }
 
 // ============================================================
