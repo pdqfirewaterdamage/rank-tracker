@@ -217,6 +217,13 @@
 
         .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
 
+        .scan-mode-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+        .scan-mode-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .scan-mode-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+        .view-mode-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+        .view-mode-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .view-mode-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
 
@@ -630,13 +637,21 @@
             </div>
             <div class="card" style="margin-bottom:0">
                 <h2>Run Scan</h2>
-                <div style="display:flex;gap:8px;align-items:end">
+                <div style="display:flex;gap:8px;align-items:end;margin-bottom:8px">
                     <div style="flex:1">
                         <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Business Name / Domain</label>
                         <input type="text" id="business-domain" placeholder="e.g., pdqrestoration.com">
                     </div>
                     <button class="btn btn-primary btn-sm" id="run-scan-btn" onclick="runScan()" style="height:40px;white-space:nowrap">Run Scan</button>
                     <button class="btn btn-outline btn-sm" onclick="clearRankings()" style="height:40px">Clear</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                    <label style="font-size:12px;color:var(--text-dim)">Search Mode:</label>
+                    <button class="btn btn-sm scan-mode-btn active" id="mode-named" onclick="setScanMode('named')" style="padding:4px 12px;font-size:12px">Named</button>
+                    <button class="btn btn-sm scan-mode-btn" id="mode-geo" onclick="setScanMode('geo')" style="padding:4px 12px;font-size:12px">Geo-located</button>
+                </div>
+                <div id="scan-mode-desc" style="font-size:11px;color:var(--text-dim);margin-bottom:4px">
+                    Searches "keyword + town name" — e.g., "water damage restoration Springfield"
                 </div>
                 <div class="status-bar" id="scan-status">
                     <div class="spinner"></div>
@@ -648,11 +663,19 @@
             </div>
         </div>
 
-        <!-- Legend -->
-        <div class="legend" style="margin-bottom:16px">
-            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Rank 1-3</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Rank 4-6</div>
-            <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Rank 7+</div>
+        <!-- Legend + view mode toggle -->
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+            <div class="legend" style="margin:0">
+                <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Rank 1-3</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Rank 4-6</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Rank 7+</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+                <label style="font-size:12px;color:var(--text-dim)">View:</label>
+                <button class="btn btn-sm view-mode-btn active" id="view-all" onclick="setViewMode('all')" style="padding:4px 12px;font-size:12px">All</button>
+                <button class="btn btn-sm view-mode-btn" id="view-named" onclick="setViewMode('named')" style="padding:4px 12px;font-size:12px">Named</button>
+                <button class="btn btn-sm view-mode-btn" id="view-geo" onclick="setViewMode('geo')" style="padding:4px 12px;font-size:12px">Geo-located</button>
+            </div>
         </div>
 
         <!-- Category heatmaps with results side by side -->
@@ -702,6 +725,12 @@
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
             <h2 style="font-size:18px;margin:0">Search Engine Results</h2>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <label style="font-size:13px;color:var(--text-dim)">Mode:</label>
+                <select id="serp-mode-filter" onchange="renderSerpPage()" style="width:auto;min-width:120px">
+                    <option value="all">All</option>
+                    <option value="named">Named</option>
+                    <option value="geo">Geo-located</option>
+                </select>
                 <label style="font-size:13px;color:var(--text-dim)">Category:</label>
                 <select id="serp-cat-filter" onchange="renderSerpPage()" style="width:auto;min-width:180px">
                     <option value="all">All Categories</option>
@@ -1798,6 +1827,48 @@ function loadBusinessDomain() {
 }
 
 // ============================================================
+// SEARCH MODE (Named vs Geo-located)
+// ============================================================
+let currentScanMode = 'named'; // 'named' or 'geo'
+let currentViewMode = 'all';   // 'all', 'named', or 'geo'
+
+function setScanMode(mode) {
+    currentScanMode = mode;
+    document.querySelectorAll('.scan-mode-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('mode-' + mode).classList.add('active');
+    const desc = document.getElementById('scan-mode-desc');
+    if (mode === 'named') {
+        desc.textContent = 'Searches "keyword + town name" \u2014 e.g., "water damage restoration Springfield"';
+    } else {
+        desc.textContent = 'Searches keyword only, simulated from the town\u2019s location \u2014 e.g., "water damage restoration" from Springfield';
+    }
+}
+
+function setViewMode(mode) {
+    currentViewMode = mode;
+    document.querySelectorAll('.view-mode-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('view-' + mode).classList.add('active');
+    renderResults();
+    renderCategoryMaps();
+}
+
+function getFilteredRankings(proj) {
+    const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
+    let rankings = proj.rankings.filter(r => visibleTownIds.has(r.townId));
+    if (currentViewMode !== 'all') {
+        rankings = rankings.filter(r => (r.searchMode || 'named') === currentViewMode);
+    }
+    return rankings;
+}
+
+// Helper: strip state from town name for search query
+function townNameOnly(fullName) {
+    // Town names stored as "Springfield, New Jersey" — strip the state part
+    const parts = fullName.split(',');
+    return parts[0].trim();
+}
+
+// ============================================================
 // RANKING SCAN (Real Google via Serper API)
 // ============================================================
 async function runScan() {
@@ -1824,7 +1895,8 @@ async function runScan() {
     statusBar.classList.add('visible');
     progressBar.style.display = 'block';
 
-    proj.rankings = [];
+    // Only clear rankings for the current scan mode, keep the other mode's data
+    proj.rankings = proj.rankings.filter(r => (r.searchMode || 'named') !== currentScanMode);
 
     const totalTasks = proj.towns.length * proj.categories.reduce((s, c) => s + c.keywords.length, 0);
     let done = 0;
@@ -1842,25 +1914,31 @@ async function runScan() {
     // Search terms to match against (lowercase)
     const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
+    const scanMode = currentScanMode;
+
     for (const town of proj.towns) {
         for (const cat of proj.categories) {
             for (const keyword of cat.keywords) {
-                const query = keyword + ' ' + town.name;
-                statusText.textContent = `Searching "${query}" (${done + 1}/${totalTasks})...`;
+                // Named: "keyword TownName" | Geo: "keyword" with location param
+                const townShort = townNameOnly(town.name);
+                const query = scanMode === 'named' ? keyword + ' ' + townShort : keyword;
+                const statusLabel = scanMode === 'geo' ? `"${keyword}" from ${townShort}` : `"${query}"`;
+                statusText.textContent = `Searching ${statusLabel} (${done + 1}/${totalTasks})...`;
                 progressFill.style.width = ((done / totalTasks) * 100) + '%';
 
                 try {
+                    const serperBody = { q: query, num: 20, gl: 'us' };
+                    if (scanMode === 'geo') {
+                        serperBody.location = town.name; // "Town, State" for Serper location
+                    }
+
                     const resp = await fetch('https://google.serper.dev/search', {
                         method: 'POST',
                         headers: {
                             'X-API-KEY': apiKey,
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({
-                            q: query,
-                            num: 20,
-                            gl: 'us'
-                        })
+                        body: JSON.stringify(serperBody)
                     });
 
                     if (!resp.ok) {
@@ -1941,6 +2019,7 @@ async function runScan() {
                         query,
                         topResults,
                         screenshot,
+                        searchMode: scanMode,
                         scannedAt: new Date().toISOString()
                     });
 
@@ -1998,8 +2077,7 @@ function renderResults() {
     if (!proj) return;
     const filter = document.getElementById('results-cat-filter').value;
 
-    const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
-    let rankings = proj.rankings.filter(r => visibleTownIds.has(r.townId));
+    let rankings = getFilteredRankings(proj);
     if (filter !== 'all') rankings = rankings.filter(r => r.categoryId === filter);
 
     if (rankings.length === 0) {
@@ -2013,7 +2091,7 @@ function renderResults() {
         byTown[r.townId].push(r);
     }
 
-    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Rank</th><th>Found</th><th>Verify</th></tr></thead><tbody>';
+    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th>Rank</th><th>Found</th><th>Verify</th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
@@ -2027,10 +2105,15 @@ function renderResults() {
                 ? `<a href="${esc(r.foundUrl)}" target="_blank" style="color:var(--accent);font-size:12px;word-break:break-all">${esc(r.foundTitle || r.foundUrl)}</a>`
                 : '<span style="color:var(--text-dim);font-size:12px;font-style:italic">Not in top 20</span>';
 
+            const modeLabel = (r.searchMode || 'named') === 'geo'
+                ? '<span style="color:#64b5f6;font-size:11px;font-weight:600">Geo</span>'
+                : '<span style="color:var(--accent);font-size:11px;font-weight:600">Named</span>';
+
             html += `<tr>
                 <td>${esc(town.name)}</td>
                 <td>${cat ? esc(cat.name) : '—'}</td>
                 <td>${esc(r.keyword)}</td>
+                <td>${modeLabel}</td>
                 <td><span class="rank-badge ${rankClass}">${rankDisplay}</span></td>
                 <td style="max-width:250px">${foundInfo}</td>
                 <td>
@@ -2359,11 +2442,13 @@ function renderSerpPage() {
     const proj = getActiveProject();
     if (!proj) return;
 
+    const modeFilter = document.getElementById('serp-mode-filter').value;
     const catFilter = document.getElementById('serp-cat-filter').value;
     const townFilter = document.getElementById('serp-town-filter').value;
 
     const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
     let rankings = proj.rankings.filter(r => visibleTownIds.has(r.townId));
+    if (modeFilter !== 'all') rankings = rankings.filter(r => (r.searchMode || 'named') === modeFilter);
     if (catFilter !== 'all') rankings = rankings.filter(r => r.categoryId === catFilter);
     if (townFilter !== 'all') rankings = rankings.filter(r => r.townId === townFilter);
 
@@ -2393,7 +2478,7 @@ function renderSerpPage() {
                 <span class="rank-badge ${rankClass}">${rankDisplay}</span>
                 <div style="min-width:0">
                     <div style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(query)}</div>
-                    <div style="font-size:12px;color:var(--text-dim)">${cat ? esc(cat.name) : ''} &middot; ${town ? esc(town.name) : ''} &middot; ${new Date(ranking.scannedAt).toLocaleString()}</div>
+                    <div style="font-size:12px;color:var(--text-dim)">${cat ? esc(cat.name) : ''} &middot; ${town ? esc(town.name) : ''} &middot; <span style="color:${(ranking.searchMode || 'named') === 'geo' ? '#64b5f6' : 'var(--accent)'};font-weight:600">${(ranking.searchMode || 'named') === 'geo' ? 'Geo' : 'Named'}</span> &middot; ${new Date(ranking.scannedAt).toLocaleString()}</div>
                 </div>
             </div>
             <a href="${googleUrl}" target="_blank" class="btn btn-outline btn-sm" style="white-space:nowrap">Open in Google</a>
@@ -2526,8 +2611,7 @@ function renderCategoryResults(catId, kwFilter) {
     const proj = getActiveProject();
     if (!proj) return;
 
-    const visibleTownIds = new Set(getVisibleTowns().map(t => t.id));
-    let rankings = proj.rankings.filter(r => r.categoryId === catId && visibleTownIds.has(r.townId));
+    let rankings = getFilteredRankings(proj).filter(r => r.categoryId === catId);
     if (kwFilter !== '__avg__') rankings = rankings.filter(r => r.keyword === kwFilter);
 
     if (rankings.length === 0) {
@@ -2568,13 +2652,14 @@ function populateCategoryMap(catId, kwFilter) {
     }
     categoryMarkers[catId] = [];
 
+    const allFiltered = getFilteredRankings(proj);
     const towns = getVisibleTowns();
     for (const town of towns) {
         let relevantRankings;
         if (kwFilter === '__avg__') {
-            relevantRankings = proj.rankings.filter(r => r.townId === town.id && r.categoryId === catId);
+            relevantRankings = allFiltered.filter(r => r.townId === town.id && r.categoryId === catId);
         } else {
-            relevantRankings = proj.rankings.filter(r => r.townId === town.id && r.categoryId === catId && r.keyword === kwFilter);
+            relevantRankings = allFiltered.filter(r => r.townId === town.id && r.categoryId === catId && r.keyword === kwFilter);
         }
         if (relevantRankings.length === 0) continue;
 
