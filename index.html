@@ -646,6 +646,60 @@
 
 </div>
 
+<!-- Remap Town Modal -->
+<div class="modal-backdrop" id="remap-modal">
+    <div class="modal" style="max-width:550px">
+        <h2>Remap Town</h2>
+        <input type="hidden" id="remap-town-id">
+        <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">
+            This town was mapped to the wrong location. You can retry the automatic lookup or enter a custom search query for Google to find the right place.
+        </p>
+
+        <div style="background:var(--surface2);border-radius:8px;padding:14px;margin-bottom:16px">
+            <div style="font-size:13px;color:var(--text-dim)">Current mapping:</div>
+            <div style="font-size:15px;font-weight:600;margin-top:4px" id="remap-town-name"></div>
+            <div style="font-size:13px;color:var(--text-dim);margin-top:4px">
+                Lat: <span id="remap-current-lat"></span>, Lng: <span id="remap-current-lng"></span>
+                — <span id="remap-current-dist" style="color:var(--red)"></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Custom Search Query (be more specific to get the right location)</label>
+            <input type="text" id="remap-query" placeholder="e.g., Springfield, Ohio, USA">
+        </div>
+
+        <div class="btn-group" style="margin-bottom:16px">
+            <button class="btn btn-primary" onclick="remapWithQuery()">Search &amp; Remap</button>
+            <button class="btn btn-outline" onclick="retryRemap()">Retry Original Name</button>
+        </div>
+
+        <div id="remap-result" style="display:none">
+            <div style="background:var(--surface2);border-radius:8px;padding:14px;border:1px solid var(--border)">
+                <div style="font-size:13px;color:var(--text-dim)">New location found:</div>
+                <div style="font-size:15px;font-weight:600;margin-top:4px" id="remap-result-display"></div>
+                <div style="font-size:13px;color:var(--text-dim);margin-top:4px">
+                    Lat: <span id="remap-new-lat"></span>, Lng: <span id="remap-new-lng"></span>
+                    — <span id="remap-new-dist"></span>
+                </div>
+            </div>
+            <div class="btn-group" style="margin-top:12px">
+                <button class="btn btn-primary" onclick="confirmRemap()" style="background:var(--green)">&#x2713; Confirm — Use This Location</button>
+                <button class="btn btn-outline" onclick="cancelRemapResult()">Try Again</button>
+            </div>
+        </div>
+
+        <div class="status-bar" id="remap-status">
+            <div class="spinner"></div>
+            <span id="remap-status-text">Looking up location...</span>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('remap-modal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Category Modal -->
 <div class="modal-backdrop" id="edit-cat-modal">
     <div class="modal">
@@ -1343,7 +1397,10 @@ function renderTowns() {
                 <td style="color:var(--text-dim)">${t.lat.toFixed(4)}</td>
                 <td style="color:var(--text-dim)">${t.lng.toFixed(4)}</td>
                 <td style="color:var(--red)">${dist} mi</td>
-                <td><button class="btn btn-sm btn-danger" onclick="deleteTown('${t.id}')">&#x2715;</button></td>
+                <td style="white-space:nowrap">
+                    <button class="btn btn-sm btn-outline" onclick="openRemapModal('${t.id}')" style="border-color:var(--orange);color:var(--orange)">Remap</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteTown('${t.id}')">&#x2715;</button>
+                </td>
             </tr>`;
         }
     }
@@ -1373,6 +1430,121 @@ function clearAllTowns() {
     proj.rankings = [];
     saveData(data);
     renderTowns();
+}
+
+// ============================================================
+// REMAP TOWN
+// ============================================================
+let pendingRemap = { lat: null, lng: null, display: '' };
+
+function openRemapModal(townId) {
+    const proj = getActiveProject();
+    if (!proj) return;
+    const town = proj.towns.find(t => t.id === townId);
+    if (!town) return;
+
+    document.getElementById('remap-town-id').value = townId;
+    document.getElementById('remap-town-name').textContent = town.name;
+    document.getElementById('remap-current-lat').textContent = town.lat.toFixed(4);
+    document.getElementById('remap-current-lng').textContent = town.lng.toFixed(4);
+    document.getElementById('remap-query').value = town.name;
+
+    if (proj.radiusCenter) {
+        const dist = distanceMiles(proj.radiusCenter.lat, proj.radiusCenter.lng, town.lat, town.lng).toFixed(1);
+        document.getElementById('remap-current-dist').textContent = dist + ' mi from center';
+    } else {
+        document.getElementById('remap-current-dist').textContent = '';
+    }
+
+    document.getElementById('remap-result').style.display = 'none';
+    document.getElementById('remap-status').classList.remove('visible');
+    pendingRemap = { lat: null, lng: null, display: '' };
+
+    document.getElementById('remap-modal').classList.add('open');
+}
+
+async function remapWithQuery() {
+    const query = document.getElementById('remap-query').value.trim();
+    if (!query) return alert('Enter a search query');
+    await doRemapSearch(query);
+}
+
+async function retryRemap() {
+    const proj = getActiveProject();
+    if (!proj) return;
+    const townId = document.getElementById('remap-town-id').value;
+    const town = proj.towns.find(t => t.id === townId);
+    if (!town) return;
+    await doRemapSearch(town.name + ', USA');
+}
+
+async function doRemapSearch(query) {
+    const statusBar = document.getElementById('remap-status');
+    const statusText = document.getElementById('remap-status-text');
+    const resultDiv = document.getElementById('remap-result');
+
+    statusBar.classList.add('visible');
+    statusText.textContent = `Looking up "${query}"...`;
+    resultDiv.style.display = 'none';
+
+    try {
+        const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`, {
+            headers: { 'User-Agent': 'LocalRankTracker/1.0' }
+        });
+        const results = await resp.json();
+
+        statusBar.classList.remove('visible');
+
+        if (results.length === 0) {
+            alert('No results found for "' + query + '". Try a more specific query.');
+            return;
+        }
+
+        // Use the first result
+        const best = results[0];
+        pendingRemap.lat = parseFloat(best.lat);
+        pendingRemap.lng = parseFloat(best.lon);
+        pendingRemap.display = best.display_name || query;
+
+        document.getElementById('remap-result-display').textContent = pendingRemap.display;
+        document.getElementById('remap-new-lat').textContent = pendingRemap.lat.toFixed(4);
+        document.getElementById('remap-new-lng').textContent = pendingRemap.lng.toFixed(4);
+
+        const proj = getActiveProject();
+        if (proj && proj.radiusCenter) {
+            const dist = distanceMiles(proj.radiusCenter.lat, proj.radiusCenter.lng, pendingRemap.lat, pendingRemap.lng).toFixed(1);
+            const inRange = dist <= (proj.radiusMiles || 25);
+            document.getElementById('remap-new-dist').innerHTML = `${dist} mi from center ${inRange ? '<span style="color:var(--green)">&#x2713; Within radius</span>' : '<span style="color:var(--red)">&#x26A0; Still outside radius</span>'}`;
+        } else {
+            document.getElementById('remap-new-dist').textContent = '';
+        }
+
+        resultDiv.style.display = 'block';
+
+    } catch (e) {
+        statusBar.classList.remove('visible');
+        alert('Geocoding error: ' + e.message);
+    }
+}
+
+function confirmRemap() {
+    if (pendingRemap.lat === null) return;
+    const proj = getActiveProject();
+    if (!proj) return;
+    const townId = document.getElementById('remap-town-id').value;
+    const town = proj.towns.find(t => t.id === townId);
+    if (!town) return;
+
+    town.lat = pendingRemap.lat;
+    town.lng = pendingRemap.lng;
+    saveData(data);
+    closeModal('remap-modal');
+    renderTowns();
+}
+
+function cancelRemapResult() {
+    document.getElementById('remap-result').style.display = 'none';
+    pendingRemap = { lat: null, lng: null, display: '' };
 }
 
 // ============================================================
