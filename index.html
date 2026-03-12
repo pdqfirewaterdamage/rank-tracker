@@ -636,6 +636,32 @@
     </div>
 </div>
 
+<!-- Search Preview Modal -->
+<div class="modal-backdrop" id="search-preview-modal">
+    <div class="modal" style="max-width:800px">
+        <h2 id="search-preview-title">Search Preview</h2>
+        <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px" id="search-preview-subtitle"></p>
+        <div style="text-align:center;margin-bottom:16px">
+            <img id="search-preview-img" src="" alt="Search screenshot"
+                style="max-width:100%;border-radius:8px;border:1px solid var(--border);display:none;cursor:pointer"
+                onclick="window.open(this.dataset.searchUrl, '_blank')">
+            <div id="search-preview-loading" style="padding:40px;color:var(--text-dim)">
+                <div class="spinner" style="margin:0 auto 12px"></div>
+                Loading screenshot...
+            </div>
+            <div id="search-preview-error" style="display:none;padding:30px;color:var(--text-dim)">
+                Screenshot unavailable. Click the button below to verify directly on Google.
+            </div>
+        </div>
+        <div class="modal-actions" style="justify-content:space-between">
+            <a id="search-preview-link" href="#" target="_blank" class="btn btn-primary" style="text-decoration:none">
+                Open on Google &#x2197;
+            </a>
+            <button class="btn btn-outline" onclick="closeModal('search-preview-modal')">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Project Modal -->
 <div class="modal-backdrop" id="edit-project-modal">
     <div class="modal">
@@ -1437,7 +1463,7 @@ function renderResults() {
         byTown[r.townId].push(r);
     }
 
-    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Rank</th></tr></thead><tbody>';
+    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Rank</th><th>Verify</th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
@@ -1445,17 +1471,55 @@ function renderResults() {
         for (const r of byTown[townId]) {
             const cat = proj.categories.find(c => c.id === r.categoryId);
             const rankClass = r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
+            const searchQuery = encodeURIComponent(r.keyword + ' ' + town.name);
+            const googleUrl = 'https://www.google.com/search?q=' + searchQuery;
             html += `<tr>
                 <td>${esc(town.name)}</td>
                 <td>${cat ? esc(cat.name) : '—'}</td>
                 <td>${esc(r.keyword)}</td>
                 <td><span class="rank-badge ${rankClass}">${r.rank}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-outline" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${esc(town.name).replace(/'/g, "\\'")}')">
+                        &#x1F50D; View
+                    </button>
+                </td>
             </tr>`;
         }
     }
 
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+function showSearchPreview(keyword, townName) {
+    const query = keyword + ' ' + townName;
+    const googleUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+    const screenshotUrl = 'https://image.thum.io/get/width/1280/crop/900/https://www.google.com/search?q=' + encodeURIComponent(query);
+
+    document.getElementById('search-preview-title').textContent = 'Search: ' + query;
+    document.getElementById('search-preview-subtitle').textContent = 'Screenshot of Google results for "' + query + '"';
+    document.getElementById('search-preview-link').href = googleUrl;
+
+    const img = document.getElementById('search-preview-img');
+    const loading = document.getElementById('search-preview-loading');
+    const error = document.getElementById('search-preview-error');
+
+    img.style.display = 'none';
+    loading.style.display = 'block';
+    error.style.display = 'none';
+    img.dataset.searchUrl = googleUrl;
+
+    img.onload = () => {
+        loading.style.display = 'none';
+        img.style.display = 'block';
+    };
+    img.onerror = () => {
+        loading.style.display = 'none';
+        error.style.display = 'block';
+    };
+    img.src = screenshotUrl;
+
+    document.getElementById('search-preview-modal').classList.add('open');
 }
 
 // ============================================================
