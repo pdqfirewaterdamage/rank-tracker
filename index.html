@@ -569,10 +569,29 @@
     <!-- RANKINGS PAGE -->
     <div class="page" id="page-rankings">
         <div class="card">
-            <h2>Run Ranking Scan</h2>
-            <p style="color:var(--text-dim);font-size:14px;margin-bottom:16px">
-                Simulates Google search rankings for all keywords across all towns in this project.
+            <h2>API Settings</h2>
+            <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px">
+                Enter your <a href="https://serper.dev" target="_blank" style="color:var(--accent)">Serper.dev</a> API key to pull real Google rankings. Your key is stored only in your browser — never uploaded.
             </p>
+            <div class="form-group" style="margin-bottom:8px">
+                <div style="display:flex;gap:8px">
+                    <input type="password" id="serper-api-key" placeholder="Paste your Serper API key" style="flex:1">
+                    <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Save Key</button>
+                    <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility()">Show</button>
+                </div>
+            </div>
+            <div id="api-key-status" style="font-size:12px;color:var(--text-dim)"></div>
+        </div>
+
+        <div class="card">
+            <h2>Run Ranking Scan</h2>
+            <p style="color:var(--text-dim);font-size:14px;margin-bottom:12px">
+                Searches Google via Serper API for each keyword + town and finds your ranking position.
+            </p>
+            <div class="form-group">
+                <label>Your Business Name / Domain (to find in results)</label>
+                <input type="text" id="business-domain" placeholder="e.g., pdqrestoration.com or PDQ Fire &amp; Water Damage">
+            </div>
             <div class="btn-group">
                 <button class="btn btn-primary" id="run-scan-btn" onclick="runScan()">Run Full Scan</button>
                 <button class="btn btn-outline" onclick="clearRankings()">Clear All Rankings</button>
@@ -1344,11 +1363,58 @@ function clearAllTowns() {
 }
 
 // ============================================================
-// RANKING SCAN
+// API KEY MANAGEMENT
+// ============================================================
+const API_KEY_STORAGE = 'rankTracker_serperKey';
+const BUSINESS_STORAGE = 'rankTracker_businessDomain';
+
+function saveApiKey() {
+    const key = document.getElementById('serper-api-key').value.trim();
+    if (!key) return alert('Enter an API key');
+    localStorage.setItem(API_KEY_STORAGE, key);
+    updateApiKeyStatus();
+}
+
+function getApiKey() {
+    return localStorage.getItem(API_KEY_STORAGE) || '';
+}
+
+function updateApiKeyStatus() {
+    const key = getApiKey();
+    const el = document.getElementById('api-key-status');
+    if (key) {
+        el.innerHTML = '<span style="color:var(--green)">&#x2713; API key saved</span>';
+        document.getElementById('serper-api-key').value = key;
+    } else {
+        el.innerHTML = '<span style="color:var(--orange)">No API key set — add one above</span>';
+    }
+}
+
+function toggleKeyVisibility() {
+    const input = document.getElementById('serper-api-key');
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// Load saved business domain
+function loadBusinessDomain() {
+    const saved = localStorage.getItem(BUSINESS_STORAGE) || '';
+    document.getElementById('business-domain').value = saved;
+}
+
+// ============================================================
+// RANKING SCAN (Real Google via Serper API)
 // ============================================================
 async function runScan() {
     const proj = requireProject();
     if (!proj) return;
+
+    const apiKey = getApiKey();
+    if (!apiKey) return alert('Enter your Serper API key first in the API Settings above');
+
+    const businessDomain = document.getElementById('business-domain').value.trim();
+    if (!businessDomain) return alert('Enter your business name or domain so we can find your ranking');
+    localStorage.setItem(BUSINESS_STORAGE, businessDomain);
+
     if (proj.categories.length === 0) return alert('Add at least one category with keywords first');
     if (proj.towns.length === 0) return alert('Add at least one town first');
 
@@ -1366,32 +1432,99 @@ async function runScan() {
 
     const totalTasks = proj.towns.length * proj.categories.reduce((s, c) => s + c.keywords.length, 0);
     let done = 0;
+    let errors = 0;
+
+    // Search terms to match against (lowercase)
+    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
     for (const town of proj.towns) {
         for (const cat of proj.categories) {
             for (const keyword of cat.keywords) {
-                statusText.textContent = `Searching "${keyword}" in ${town.name}...`;
+                const query = keyword + ' ' + town.name;
+                statusText.textContent = `Searching "${query}" (${done + 1}/${totalTasks})...`;
                 progressFill.style.width = ((done / totalTasks) * 100) + '%';
 
-                const seed = hashCode(town.name + keyword);
-                const rank = simulateRank(seed);
+                try {
+                    const resp = await fetch('https://google.serper.dev/search', {
+                        method: 'POST',
+                        headers: {
+                            'X-API-KEY': apiKey,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            q: query,
+                            num: 20,
+                            gl: 'us'
+                        })
+                    });
 
-                proj.rankings.push({
-                    townId: town.id,
-                    categoryId: cat.id,
-                    keyword,
-                    rank,
-                    scannedAt: new Date().toISOString()
-                });
+                    if (!resp.ok) {
+                        const errText = await resp.text();
+                        console.error('Serper error:', resp.status, errText);
+                        errors++;
+                        if (resp.status === 401 || resp.status === 403) {
+                            alert('Invalid API key. Please check your Serper API key.');
+                            btn.disabled = false;
+                            statusBar.classList.remove('visible');
+                            progressBar.style.display = 'none';
+                            return;
+                        }
+                        done++;
+                        continue;
+                    }
+
+                    const result = await resp.json();
+                    const organic = result.organic || [];
+
+                    // Find our ranking position
+                    let rank = 20; // Default: not found in top 20
+                    let foundUrl = '';
+                    let foundTitle = '';
+
+                    for (let i = 0; i < organic.length; i++) {
+                        const entry = organic[i];
+                        const title = (entry.title || '').toLowerCase();
+                        const link = (entry.link || '').toLowerCase();
+                        const snippet = (entry.snippet || '').toLowerCase();
+
+                        const matched = searchTerms.some(term =>
+                            title.includes(term) || link.includes(term) || snippet.includes(term)
+                        );
+
+                        if (matched) {
+                            rank = i + 1;
+                            foundUrl = entry.link || '';
+                            foundTitle = entry.title || '';
+                            break;
+                        }
+                    }
+
+                    proj.rankings.push({
+                        townId: town.id,
+                        categoryId: cat.id,
+                        keyword,
+                        rank,
+                        foundUrl,
+                        foundTitle,
+                        query,
+                        scannedAt: new Date().toISOString()
+                    });
+
+                } catch (e) {
+                    console.error('Fetch error for', query, e);
+                    errors++;
+                }
 
                 done++;
-                await new Promise(r => setTimeout(r, 30));
+                // Small delay to avoid rate limits
+                await new Promise(r => setTimeout(r, 200));
             }
         }
     }
 
     progressFill.style.width = '100%';
-    statusText.textContent = `Scan complete! ${totalTasks} searches simulated.`;
+    statusText.textContent = `Scan complete! ${done} searches performed.` +
+        (errors > 0 ? ` (${errors} errors)` : '');
 
     saveData(data);
     setTimeout(() => {
@@ -1402,23 +1535,6 @@ async function runScan() {
 
     populateResultsFilter();
     renderResults();
-}
-
-function simulateRank(seed) {
-    const x = Math.abs(Math.sin(seed * 9301 + 49297) * 233280);
-    const r = x - Math.floor(x);
-    if (r < 0.25) return Math.floor(r * 12) + 1;
-    if (r < 0.55) return Math.floor((r - 0.25) * 10) + 4;
-    return Math.floor((r - 0.55) * 28) + 7;
-}
-
-function hashCode(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
-    }
-    return hash;
 }
 
 function clearRankings() {
@@ -1463,21 +1579,26 @@ function renderResults() {
         byTown[r.townId].push(r);
     }
 
-    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Rank</th><th>Verify</th></tr></thead><tbody>';
+    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Rank</th><th>Found</th><th>Verify</th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
         if (!town) continue;
         for (const r of byTown[townId]) {
             const cat = proj.categories.find(c => c.id === r.categoryId);
-            const rankClass = r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
-            const searchQuery = encodeURIComponent(r.keyword + ' ' + town.name);
-            const googleUrl = 'https://www.google.com/search?q=' + searchQuery;
+            const isNotFound = r.rank >= 20;
+            const rankClass = isNotFound ? 'rank-red' : r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
+            const rankDisplay = isNotFound ? '20+' : r.rank;
+            const foundInfo = r.foundUrl
+                ? `<a href="${esc(r.foundUrl)}" target="_blank" style="color:var(--accent);font-size:12px;word-break:break-all">${esc(r.foundTitle || r.foundUrl)}</a>`
+                : '<span style="color:var(--text-dim);font-size:12px;font-style:italic">Not in top 20</span>';
+
             html += `<tr>
                 <td>${esc(town.name)}</td>
                 <td>${cat ? esc(cat.name) : '—'}</td>
                 <td>${esc(r.keyword)}</td>
-                <td><span class="rank-badge ${rankClass}">${r.rank}</span></td>
+                <td><span class="rank-badge ${rankClass}">${rankDisplay}</span></td>
+                <td style="max-width:250px">${foundInfo}</td>
                 <td>
                     <button class="btn btn-sm btn-outline" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${esc(town.name).replace(/'/g, "\\'")}')">
                         &#x1F50D; View
@@ -1674,6 +1795,8 @@ function esc(s) {
 // ============================================================
 renderProjects();
 updateProjectBar();
+updateApiKeyStatus();
+loadBusinessDomain();
 </script>
 
 </body>
