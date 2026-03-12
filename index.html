@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Rank Tracker</title>
+    <title>PDQ Rank Tracker</title>
+    <link rel="icon" href="https://www.pdqfirewaterdamage.com/images/pdq-restoration-logo.jpg" type="image/jpeg">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --surface2: #242836;
-            --border: #2e3347;
-            --text: #e4e6f0;
-            --text-dim: #8b8fa3;
-            --accent: #6c5ce7;
-            --accent-hover: #7c6ef7;
+            --bg: #0c1a2a;
+            --surface: #122240;
+            --surface2: #1a2d4d;
+            --border: #243a5e;
+            --text: #e8ecf4;
+            --text-dim: #8a9ab5;
+            --accent: #e8732a;
+            --accent-hover: #f5882f;
             --green: #00b894;
             --orange: #fdcb6e;
             --red: #e17055;
@@ -32,14 +33,45 @@
         }
 
         header {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            padding: 16px 24px;
+            background: linear-gradient(135deg, #0d1f3c 0%, #142d52 100%);
+            border-bottom: 2px solid var(--accent);
+            padding: 12px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
             gap: 12px;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand img {
+            height: 40px;
+            border-radius: 6px;
+        }
+
+        .header-brand .brand-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-brand .brand-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: white;
+            line-height: 1.2;
+        }
+
+        .header-brand .brand-sub {
+            font-size: 11px;
+            color: var(--accent);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         header h1 {
@@ -73,7 +105,7 @@
         }
 
         .nav-tab:hover { color: var(--text); background: var(--surface2); }
-        .nav-tab.active { color: var(--text); background: var(--accent); }
+        .nav-tab.active { color: white; background: var(--accent); }
         .nav-tab:disabled { opacity: 0.4; cursor: not-allowed; }
         .nav-tab:disabled:hover { background: transparent; color: var(--text-dim); }
 
@@ -104,6 +136,10 @@
             font-weight: 600;
             color: var(--accent);
             font-size: 15px;
+        }
+
+        .project-bar {
+            background: linear-gradient(90deg, #0d1f3c, #142d52);
         }
 
         .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
@@ -166,8 +202,8 @@
             gap: 6px;
         }
 
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary { background: var(--accent); color: white; font-weight: 600; }
+        .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(232,115,42,0.3); }
         .btn-danger { background: var(--danger); color: white; }
         .btn-danger:hover { opacity: 0.9; }
         .btn-sm { padding: 6px 14px; font-size: 13px; }
@@ -368,8 +404,8 @@
             position: relative;
         }
 
-        .project-card:hover { border-color: var(--accent); transform: translateY(-2px); }
-        .project-card.active-project { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+        .project-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(232,115,42,0.15); }
+        .project-card.active-project { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 4px 12px rgba(232,115,42,0.2); }
 
         .project-card h3 { font-size: 16px; margin-bottom: 8px; }
 
@@ -414,7 +450,13 @@
 <body>
 
 <header>
-    <h1><span class="icon">&#x1F4CD;</span> Local Rank Tracker</h1>
+    <div class="header-brand">
+        <img src="https://www.pdqfirewaterdamage.com/images/pdq-restoration-logo.jpg" alt="PDQ Restoration">
+        <div class="brand-text">
+            <span class="brand-name">PDQ Rank Tracker</span>
+            <span class="brand-sub">Local SEO Performance Dashboard</span>
+        </div>
+    </div>
     <div class="nav-tabs">
         <button class="nav-tab active" data-page="projects">Projects</button>
         <button class="nav-tab" data-page="categories" id="tab-categories">Categories</button>
