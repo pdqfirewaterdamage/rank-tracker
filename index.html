@@ -564,6 +564,17 @@
             <h2>Towns <span id="town-count" style="color:var(--text-dim);font-weight:400"></span></h2>
             <div id="towns-list"></div>
         </div>
+        <div class="card" id="towns-map-card" style="display:none">
+            <h2>Town Map</h2>
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Within radius</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Over 75 miles from center</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--accent);border:2px solid var(--accent)"></div> Center address</div>
+            </div>
+            <div class="map-container" id="towns-map-container">
+                <div id="towns-map" style="height:100%"></div>
+            </div>
+        </div>
     </div>
 
     <!-- RANKINGS PAGE -->
@@ -1341,6 +1352,9 @@ function renderTowns() {
     html += '</tbody></table></div>';
     html += '<div style="margin-top:12px"><button class="btn btn-danger btn-sm" onclick="clearAllTowns()">Clear All Towns</button></div>';
     container.innerHTML = html;
+
+    // Render the town map
+    setTimeout(() => renderTownsMap(), 100);
 }
 
 function deleteTown(id) {
@@ -1360,6 +1374,123 @@ function clearAllTowns() {
     proj.rankings = [];
     saveData(data);
     renderTowns();
+}
+
+// ============================================================
+// TOWNS MAP
+// ============================================================
+let townsMap = null;
+let townsMapMarkers = [];
+
+function renderTownsMap() {
+    const proj = getActiveProject();
+    const mapCard = document.getElementById('towns-map-card');
+
+    if (!proj || proj.towns.length === 0) {
+        mapCard.style.display = 'none';
+        return;
+    }
+
+    mapCard.style.display = 'block';
+
+    // Init or reuse map
+    if (!townsMap) {
+        townsMap = L.map('towns-map').setView([39.8, -98.5], 4);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(townsMap);
+    }
+
+    // Clear old markers
+    townsMapMarkers.forEach(m => townsMap.removeLayer(m));
+    townsMapMarkers = [];
+
+    const hasCenter = proj.radiusCenter;
+    const FLAG_DISTANCE = 75;
+
+    // Add center marker if set
+    if (hasCenter) {
+        const centerIcon = L.divIcon({
+            className: '',
+            html: `<div style="width:20px;height:20px;background:var(--accent);border:3px solid white;border-radius:50%;box-shadow:0 0 8px rgba(108,92,231,0.6)"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+        const centerMarker = L.marker([proj.radiusCenter.lat, proj.radiusCenter.lng], { icon: centerIcon })
+            .addTo(townsMap)
+            .bindPopup(`<div class="popup-title">Center: ${esc(proj.radiusCenter.name)}</div>`);
+        townsMapMarkers.push(centerMarker);
+
+        // Draw 75-mile radius circle (75 miles = ~120,701 meters)
+        const radiusCircle = L.circle([proj.radiusCenter.lat, proj.radiusCenter.lng], {
+            radius: FLAG_DISTANCE * 1609.34,
+            color: 'rgba(255,255,255,0.3)',
+            fillColor: 'rgba(108,92,231,0.08)',
+            fillOpacity: 1,
+            weight: 1,
+            dashArray: '6,4'
+        }).addTo(townsMap);
+        townsMapMarkers.push(radiusCircle);
+    }
+
+    // Add town markers
+    for (const town of proj.towns) {
+        let color = '#00b894'; // green — within range
+        let isFlagged = false;
+        let dist = null;
+
+        if (hasCenter) {
+            dist = distanceMiles(proj.radiusCenter.lat, proj.radiusCenter.lng, town.lat, town.lng);
+            if (dist > FLAG_DISTANCE) {
+                color = '#e17055'; // red — too far
+                isFlagged = true;
+            }
+        }
+
+        const circle = L.circleMarker([town.lat, town.lng], {
+            radius: 8,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.85,
+            weight: 2
+        }).addTo(townsMap);
+
+        const popupHtml = `
+            <div class="popup-title">${esc(town.name)}</div>
+            ${dist !== null ? `<div style="color:${isFlagged ? '#e17055' : 'var(--text-dim)'};font-size:13px">${dist.toFixed(1)} miles from center${isFlagged ? ' &#x26A0; Over 75 mi' : ''}</div>` : ''}
+        `;
+        circle.bindPopup(popupHtml);
+
+        // Add town name label
+        const label = L.marker([town.lat, town.lng], {
+            icon: L.divIcon({
+                className: '',
+                html: `<div style="
+                    white-space:nowrap;
+                    font-size:11px;
+                    font-weight:600;
+                    color:${isFlagged ? '#e17055' : '#e4e6f0'};
+                    text-shadow:0 0 4px rgba(0,0,0,0.8);
+                    pointer-events:none;
+                    transform:translate(12px, -8px);
+                ">${esc(town.name)}${isFlagged ? ' &#x26A0;' : ''}</div>`,
+                iconSize: [0, 0],
+                iconAnchor: [0, 0]
+            })
+        }).addTo(townsMap);
+
+        townsMapMarkers.push(circle);
+        townsMapMarkers.push(label);
+    }
+
+    // Fit bounds to show all towns + center
+    const allPoints = proj.towns.map(t => [t.lat, t.lng]);
+    if (hasCenter) allPoints.push([proj.radiusCenter.lat, proj.radiusCenter.lng]);
+    if (allPoints.length > 0) {
+        townsMap.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40] });
+    }
 }
 
 // ============================================================
