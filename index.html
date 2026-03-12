@@ -1960,28 +1960,34 @@ async function runScan() {
 
             const result = await resp.json();
             const organic = result.organic || [];
+            const ads = result.ads || [];
+            const places = result.places || result.localPack || [];
+            const lsa = result.localServiceAds || [];
 
-            let rank = 20;
-            let foundUrl = '';
-            let foundTitle = '';
-
-            for (let i = 0; i < organic.length; i++) {
-                const entry = organic[i];
-                const title = (entry.title || '').toLowerCase();
-                const link = (entry.link || '').toLowerCase();
-                const snippet = (entry.snippet || '').toLowerCase();
-
-                const matched = searchTerms.some(term =>
-                    title.includes(term) || link.includes(term) || snippet.includes(term)
-                );
-
-                if (matched) {
-                    rank = i + 1;
-                    foundUrl = entry.link || '';
-                    foundTitle = entry.title || '';
-                    break;
+            // Helper to find our rank in a result list
+            function findRankIn(list) {
+                for (let i = 0; i < list.length; i++) {
+                    const entry = list[i];
+                    const title = (entry.title || entry.name || '').toLowerCase();
+                    const link = (entry.link || entry.website || '').toLowerCase();
+                    const snippet = (entry.snippet || entry.description || '').toLowerCase();
+                    const matched = searchTerms.some(term =>
+                        title.includes(term) || link.includes(term) || snippet.includes(term)
+                    );
+                    if (matched) return { rank: i + 1, url: entry.link || entry.website || '', title: entry.title || entry.name || '' };
                 }
+                return { rank: 0, url: '', title: '' };
             }
+
+            const organicMatch = findRankIn(organic);
+            const ppcMatch = findRankIn(ads);
+            const mapPackMatch = findRankIn(places);
+            const lsaMatch = findRankIn(lsa);
+
+            // Keep backward-compatible rank/foundUrl/foundTitle for organic
+            let rank = organicMatch.rank || 20;
+            let foundUrl = organicMatch.url;
+            let foundTitle = organicMatch.title;
 
             const topResults = organic.slice(0, 20).map((e, idx) => ({
                 pos: idx + 1,
@@ -2015,6 +2021,10 @@ async function runScan() {
                 rank,
                 foundUrl,
                 foundTitle,
+                rankLsa: lsaMatch.rank,
+                rankPpc: ppcMatch.rank,
+                rankMap: mapPackMatch.rank,
+                rankOrganic: organicMatch.rank || 20,
                 query,
                 topResults,
                 screenshot,
@@ -2115,16 +2125,13 @@ function renderResults() {
         byTown[r.townId].push(r);
     }
 
-    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th>Rank</th><th>Found</th><th>Verify</th></tr></thead><tbody>';
+    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th title="Local Service Ads">LSA</th><th title="Pay-Per-Click Ads">PPC</th><th title="Google Map Pack">Map</th><th title="Organic Results">Organic</th><th>Found</th><th></th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
         if (!town) continue;
         for (const r of byTown[townId]) {
             const cat = proj.categories.find(c => c.id === r.categoryId);
-            const isNotFound = r.rank >= 20;
-            const rankClass = isNotFound ? 'rank-red' : r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
-            const rankDisplay = isNotFound ? '20+' : r.rank;
             const foundInfo = r.foundUrl
                 ? `<a href="${esc(r.foundUrl)}" target="_blank" style="color:var(--accent);font-size:12px;word-break:break-all">${esc(r.foundTitle || r.foundUrl)}</a>`
                 : '<span style="color:var(--text-dim);font-size:12px;font-style:italic">Not in top 20</span>';
@@ -2138,11 +2145,14 @@ function renderResults() {
                 <td>${cat ? esc(cat.name) : '—'}</td>
                 <td>${esc(r.keyword)}</td>
                 <td>${modeLabel}</td>
-                <td><span class="rank-badge ${rankClass}">${rankDisplay}</span></td>
-                <td style="max-width:250px">${foundInfo}</td>
+                <td>${rankBadge(r.rankLsa || 0)}</td>
+                <td>${rankBadge(r.rankPpc || 0)}</td>
+                <td>${rankBadge(r.rankMap || 0)}</td>
+                <td>${rankBadge(r.rankOrganic || r.rank || 20)}</td>
+                <td style="max-width:200px">${foundInfo}</td>
                 <td>
                     <button class="btn btn-sm btn-outline" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${town.id}', '${cat ? cat.id : ''}')">
-                        &#x1F50D; View
+                        View
                     </button>
                 </td>
             </tr>`;
@@ -2586,6 +2596,14 @@ function renderCategoryMaps() {
                         <option value="__avg__">Average (all keywords)</option>
                         ${cat.keywords.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('')}
                     </select>
+                    <label style="font-size:13px;color:var(--text-dim)">Type:</label>
+                    <select id="ranktype-select-${cat.id}" onchange="updateCategoryMap('${cat.id}')">
+                        <option value="organic">Organic</option>
+                        <option value="map">Map Pack</option>
+                        <option value="ppc">PPC</option>
+                        <option value="lsa">LSA</option>
+                        <option value="best">Best</option>
+                    </select>
                 </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -2611,7 +2629,7 @@ function renderCategoryMaps() {
             categoryMaps[cat.id] = map;
             categoryMarkers[cat.id] = [];
 
-            populateCategoryMap(cat.id, '__avg__');
+            populateCategoryMap(cat.id, '__avg__', 'organic');
             renderCategoryResults(cat.id, '__avg__');
 
             const vt = getVisibleTowns();
@@ -2623,10 +2641,13 @@ function renderCategoryMaps() {
 }
 
 function updateCategoryMap(catId) {
-    const sel = document.getElementById('kw-select-' + catId);
-    if (!sel) return;
-    populateCategoryMap(catId, sel.value);
-    renderCategoryResults(catId, sel.value);
+    const kwSel = document.getElementById('kw-select-' + catId);
+    const typeSel = document.getElementById('ranktype-select-' + catId);
+    if (!kwSel) return;
+    const kwFilter = kwSel.value;
+    const rankType = typeSel ? typeSel.value : 'organic';
+    populateCategoryMap(catId, kwFilter, rankType);
+    renderCategoryResults(catId, kwFilter);
 }
 
 function renderCategoryResults(catId, kwFilter) {
@@ -2643,26 +2664,25 @@ function renderCategoryResults(catId, kwFilter) {
         return;
     }
 
-    let html = '<table style="font-size:13px"><thead><tr><th>Town</th><th>Keyword</th><th>Rank</th><th></th></tr></thead><tbody>';
+    let html = '<table style="font-size:12px"><thead><tr><th>Town</th><th>Keyword</th><th title="LSA">L</th><th title="PPC">P</th><th title="Map">M</th><th title="Organic">O</th></tr></thead><tbody>';
     for (const r of rankings) {
         const town = proj.towns.find(t => t.id === r.townId);
         if (!town) continue;
-        const cat = proj.categories.find(c => c.id === r.categoryId);
-        const isNotFound = r.rank >= 20;
-        const rankClass = isNotFound ? 'rank-red' : r.rank <= 3 ? 'rank-green' : r.rank <= 6 ? 'rank-orange' : 'rank-red';
-        const rankDisplay = isNotFound ? '20+' : r.rank;
         html += `<tr>
             <td>${esc(town.name)}</td>
             <td>${esc(r.keyword)}</td>
-            <td><span class="rank-badge ${rankClass}" style="width:28px;height:28px;font-size:12px">${rankDisplay}</span></td>
-            <td><button class="btn btn-sm btn-outline" style="padding:3px 8px;font-size:11px" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${town.id}', '${cat ? cat.id : ''}')">View</button></td>
+            <td>${rankBadge(r.rankLsa || 0, 'sm')}</td>
+            <td>${rankBadge(r.rankPpc || 0, 'sm')}</td>
+            <td>${rankBadge(r.rankMap || 0, 'sm')}</td>
+            <td>${rankBadge(r.rankOrganic || r.rank || 20, 'sm')}</td>
         </tr>`;
     }
     html += '</tbody></table>';
     container.innerHTML = html;
 }
 
-function populateCategoryMap(catId, kwFilter) {
+function populateCategoryMap(catId, kwFilter, rankType) {
+    rankType = rankType || 'organic';
     const map = categoryMaps[catId];
     if (!map) return;
     const proj = getActiveProject();
@@ -2687,7 +2707,10 @@ function populateCategoryMap(catId, kwFilter) {
         }
         if (relevantRankings.length === 0) continue;
 
-        const avgRank = Math.round(relevantRankings.reduce((s, r) => s + r.rank, 0) / relevantRankings.length);
+        // Get ranks for the selected type, filtering out 0 (not present)
+        const ranks = relevantRankings.map(r => getRankByType(r, rankType)).filter(v => v > 0);
+        if (ranks.length === 0) continue;
+        const avgRank = Math.round(ranks.reduce((s, v) => s + v, 0) / ranks.length);
 
         let color;
         if (avgRank <= 3) color = '#00b894';
@@ -2711,13 +2734,21 @@ function populateCategoryMap(catId, kwFilter) {
             })
         }).addTo(map);
 
+        const typeLabels = { lsa: 'LSA', ppc: 'PPC', map: 'Map', organic: 'Org' };
         const popupContent = `
             <div class="popup-title">${esc(town.name)}</div>
             <div style="color:var(--text-dim);font-size:12px;margin-bottom:6px">${esc(cat.name)}</div>
-            ${relevantRankings.map(r => {
-                const rc = r.rank <= 3 ? '#00b894' : r.rank <= 6 ? '#fdcb6e' : '#e17055';
-                return `<div class="popup-rank-row"><span class="kw">${esc(r.keyword)}</span><span style="color:${rc};font-weight:700">#${r.rank}</span></div>`;
-            }).join('')}
+            <table style="width:100%;font-size:11px;border-collapse:collapse">
+                <tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 4px">Keyword</th><th style="padding:2px 3px">LSA</th><th style="padding:2px 3px">PPC</th><th style="padding:2px 3px">Map</th><th style="padding:2px 3px">Org</th></tr>
+                ${relevantRankings.map(r => {
+                    function miniRank(v) {
+                        if (!v || v === 0) return '<span style="color:#666">—</span>';
+                        const c = v <= 3 ? '#00b894' : v <= 6 ? '#fdcb6e' : '#e17055';
+                        return `<span style="color:${c};font-weight:700">${v >= 20 ? '20+' : v}</span>`;
+                    }
+                    return `<tr><td style="padding:2px 4px">${esc(r.keyword)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankLsa)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankPpc)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankMap)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankOrganic || r.rank)}</td></tr>`;
+                }).join('')}
+            </table>
         `;
 
         circle.bindPopup(popupContent);
@@ -2734,6 +2765,30 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+}
+
+function rankBadge(val, size) {
+    // val: 0 = not present, 1-20 = rank, 20+ = not found
+    size = size || '';
+    const sizeStyle = size === 'sm' ? 'width:26px;height:26px;font-size:11px' : '';
+    if (!val || val === 0) return `<span class="rank-badge" style="background:var(--surface2);color:var(--text-dim);${sizeStyle}" title="Not present">—</span>`;
+    const cls = val <= 3 ? 'rank-green' : val <= 6 ? 'rank-orange' : 'rank-red';
+    const display = val >= 20 ? '20+' : val;
+    return `<span class="rank-badge ${cls}" style="${sizeStyle}">${display}</span>`;
+}
+
+// Get a specific rank type from a ranking object
+function getRankByType(r, type) {
+    switch(type) {
+        case 'lsa': return r.rankLsa || 0;
+        case 'ppc': return r.rankPpc || 0;
+        case 'map': return r.rankMap || 0;
+        case 'organic': return r.rankOrganic || r.rank || 20;
+        case 'best':
+            const vals = [r.rankLsa, r.rankPpc, r.rankMap, r.rankOrganic || r.rank].filter(v => v && v > 0);
+            return vals.length > 0 ? Math.min(...vals) : 20;
+        default: return r.rankOrganic || r.rank || 20;
+    }
 }
 
 // ============================================================
