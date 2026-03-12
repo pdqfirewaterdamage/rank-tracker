@@ -4,8 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDQ Rank Tracker</title>
-    <link rel="icon" href="https://www.pdqfirewaterdamage.com/images/pdq-restoration-logo.jpg" type="image/jpeg">
+    <link rel="icon" id="favicon" href="https://www.pdqfirewaterdamage.com/images/pdq-restoration-logo.jpg" type="image/jpeg">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script>
+    // Crop favicon to just the circular house icon (left portion of logo)
+    (function() {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function() {
+            const size = Math.min(img.width, img.height);
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            // Crop a square from the left side of the image (where the house circle is)
+            ctx.drawImage(img, 0, 0, size, size, 0, 0, 64, 64);
+            const link = document.getElementById('favicon');
+            link.href = canvas.toDataURL('image/png');
+            link.type = 'image/png';
+        };
+        img.src = 'https://www.pdqfirewaterdamage.com/images/pdq-restoration-logo.jpg';
+    })();
+    </script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
