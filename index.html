@@ -668,22 +668,11 @@
 
 <!-- Search Preview Modal -->
 <div class="modal-backdrop" id="search-preview-modal">
-    <div class="modal" style="max-width:800px">
-        <h2 id="search-preview-title">Search Preview</h2>
-        <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px" id="search-preview-subtitle"></p>
-        <div style="text-align:center;margin-bottom:16px">
-            <img id="search-preview-img" src="" alt="Search screenshot"
-                style="max-width:100%;border-radius:8px;border:1px solid var(--border);display:none;cursor:pointer"
-                onclick="window.open(this.dataset.searchUrl, '_blank')">
-            <div id="search-preview-loading" style="padding:40px;color:var(--text-dim)">
-                <div class="spinner" style="margin:0 auto 12px"></div>
-                Loading screenshot...
-            </div>
-            <div id="search-preview-error" style="display:none;padding:30px;color:var(--text-dim)">
-                Screenshot unavailable. Click the button below to verify directly on Google.
-            </div>
-        </div>
-        <div class="modal-actions" style="justify-content:space-between">
+    <div class="modal" style="max-width:700px;max-height:85vh">
+        <h2 id="search-preview-title">Search Results</h2>
+        <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px" id="search-preview-subtitle"></p>
+        <div id="search-preview-results" style="max-height:55vh;overflow-y:auto;padding-right:4px"></div>
+        <div class="modal-actions" style="justify-content:space-between;margin-top:16px">
             <a id="search-preview-link" href="#" target="_blank" class="btn btn-primary" style="text-decoration:none">
                 Open on Google &#x2197;
             </a>
@@ -1640,6 +1629,14 @@ async function runScan() {
                         }
                     }
 
+                    // Store top 20 results for verification
+                    const topResults = organic.slice(0, 20).map((e, idx) => ({
+                        pos: idx + 1,
+                        title: e.title || '',
+                        link: e.link || '',
+                        snippet: e.snippet || ''
+                    }));
+
                     proj.rankings.push({
                         townId: town.id,
                         categoryId: cat.id,
@@ -1648,6 +1645,7 @@ async function runScan() {
                         foundUrl,
                         foundTitle,
                         query,
+                        topResults,
                         scannedAt: new Date().toISOString()
                     });
 
@@ -1741,7 +1739,7 @@ function renderResults() {
                 <td><span class="rank-badge ${rankClass}">${rankDisplay}</span></td>
                 <td style="max-width:250px">${foundInfo}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${esc(town.name).replace(/'/g, "\\'")}')">
+                    <button class="btn btn-sm btn-outline" onclick="showSearchPreview('${esc(r.keyword).replace(/'/g, "\\'")}', '${town.id}', '${cat ? cat.id : ''}')">
                         &#x1F50D; View
                     </button>
                 </td>
@@ -1753,33 +1751,64 @@ function renderResults() {
     container.innerHTML = html;
 }
 
-function showSearchPreview(keyword, townName) {
-    const query = keyword + ' ' + townName;
+function showSearchPreview(keyword, townId, catId) {
+    const proj = getActiveProject();
+    if (!proj) return;
+
+    // Find the ranking entry
+    const ranking = proj.rankings.find(r => r.keyword === keyword && r.townId === townId && r.categoryId === catId);
+    if (!ranking) return;
+
+    const town = proj.towns.find(t => t.id === townId);
+    const query = ranking.query || (keyword + ' ' + (town ? town.name : ''));
     const googleUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
-    const screenshotUrl = 'https://image.thum.io/get/width/1280/crop/900/https://www.google.com/search?q=' + encodeURIComponent(query);
+    const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
+    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
     document.getElementById('search-preview-title').textContent = 'Search: ' + query;
-    document.getElementById('search-preview-subtitle').textContent = 'Screenshot of Google results for "' + query + '"';
+    document.getElementById('search-preview-subtitle').textContent =
+        `Scanned ${new Date(ranking.scannedAt).toLocaleString()} — Your rank: ${ranking.rank >= 20 ? 'Not in top 20' : '#' + ranking.rank}`;
     document.getElementById('search-preview-link').href = googleUrl;
 
-    const img = document.getElementById('search-preview-img');
-    const loading = document.getElementById('search-preview-loading');
-    const error = document.getElementById('search-preview-error');
+    const resultsContainer = document.getElementById('search-preview-results');
+    const topResults = ranking.topResults || [];
 
-    img.style.display = 'none';
-    loading.style.display = 'block';
-    error.style.display = 'none';
-    img.dataset.searchUrl = googleUrl;
+    if (topResults.length === 0) {
+        resultsContainer.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-dim)">No stored results. Re-run the scan to capture search results.</div>';
+    } else {
+        let html = '';
+        for (const result of topResults) {
+            // Check if this result matches the business
+            const isMatch = searchTerms.some(term =>
+                result.title.toLowerCase().includes(term) ||
+                result.link.toLowerCase().includes(term) ||
+                result.snippet.toLowerCase().includes(term)
+            );
 
-    img.onload = () => {
-        loading.style.display = 'none';
-        img.style.display = 'block';
-    };
-    img.onerror = () => {
-        loading.style.display = 'none';
-        error.style.display = 'block';
-    };
-    img.src = screenshotUrl;
+            const borderColor = isMatch ? 'var(--green)' : 'var(--border)';
+            const bgColor = isMatch ? 'rgba(0,184,148,0.08)' : 'transparent';
+
+            html += `
+                <div style="padding:12px;border:1px solid ${borderColor};border-radius:8px;margin-bottom:8px;background:${bgColor}">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <span style="
+                            display:inline-flex;align-items:center;justify-content:center;
+                            min-width:26px;height:26px;border-radius:50%;font-size:12px;font-weight:700;
+                            background:${isMatch ? 'var(--green)' : 'var(--surface2)'};
+                            color:${isMatch ? '#000' : 'var(--text-dim)'};
+                        ">${result.pos}</span>
+                        ${isMatch ? '<span style="font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase">&#x2713; Your Business</span>' : ''}
+                    </div>
+                    <a href="${esc(result.link)}" target="_blank" style="color:var(--accent);font-size:14px;font-weight:500;text-decoration:none;word-break:break-all">
+                        ${esc(result.title)}
+                    </a>
+                    <div style="color:var(--green);font-size:12px;margin-top:2px;word-break:break-all">${esc(result.link)}</div>
+                    <div style="color:var(--text-dim);font-size:13px;margin-top:4px;line-height:1.5">${esc(result.snippet)}</div>
+                </div>
+            `;
+        }
+        resultsContainer.innerHTML = html;
+    }
 
     document.getElementById('search-preview-modal').classList.add('open');
 }
