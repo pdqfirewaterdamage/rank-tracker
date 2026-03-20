@@ -2146,13 +2146,73 @@ function renderResults() {
         return;
     }
 
+    // ── Build averages summary ──
+    const avgByCat = {};
+    for (const r of rankings) {
+        const catId = r.categoryId;
+        if (!avgByCat[catId]) avgByCat[catId] = { lsa: [], ppc: [], map: [], organic: [] };
+        const o = avgByCat[catId];
+        if (r.rankLsa && r.rankLsa > 0 && r.rankLsa < 20) o.lsa.push(r.rankLsa);
+        if (r.rankPpc && r.rankPpc > 0 && r.rankPpc < 20) o.ppc.push(r.rankPpc);
+        if (r.rankMap && r.rankMap > 0 && r.rankMap < 20) o.map.push(r.rankMap);
+        const org = r.rankOrganic || r.rank || 0;
+        if (org > 0 && org < 20) o.organic.push(org);
+    }
+    const avgVal = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : null;
+    const fmtAvg = v => v !== null ? v.toFixed(1) : '—';
+    const avgColor = v => {
+        if (v === null) return 'var(--text-dim)';
+        if (v <= 3) return 'var(--green)';
+        if (v <= 6) return 'var(--orange)';
+        return 'var(--red)';
+    };
+    const avgCell = v => `<span style="font-weight:700;font-size:15px;color:${avgColor(v)}">${fmtAvg(v)}</span>`;
+
+    const catIds = Object.keys(avgByCat);
+    const catOrganicAvgs = [];
+
+    let avgHtml = '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">';
+    avgHtml += '<h3 style="margin:0 0 14px 0;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px"><span style="font-size:18px">&#x1F4CA;</span> Average Rankings</h3>';
+    avgHtml += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">';
+
+    for (const catId of catIds) {
+        const cat = proj.categories.find(c => c.id === catId);
+        const o = avgByCat[catId];
+        const lsaAvg = avgVal(o.lsa);
+        const ppcAvg = avgVal(o.ppc);
+        const mapAvg = avgVal(o.map);
+        const organicAvg = avgVal(o.organic);
+        if (organicAvg !== null) catOrganicAvgs.push(organicAvg);
+
+        avgHtml += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px">
+            <div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--text)">${cat ? esc(cat.name) : 'Unknown'}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
+                <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">LSA</div>${avgCell(lsaAvg)}</div>
+                <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">PPC</div>${avgCell(ppcAvg)}</div>
+                <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Map</div>${avgCell(mapAvg)}</div>
+                <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Organic</div>${avgCell(organicAvg)}</div>
+            </div>
+        </div>`;
+    }
+
+    avgHtml += '</div>';
+
+    // Total average (average of each category's organic average)
+    const totalAvg = catOrganicAvgs.length ? catOrganicAvgs.reduce((a, b) => a + b, 0) / catOrganicAvgs.length : null;
+    avgHtml += `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:14px;font-weight:600">Overall Average (across all categories)</span>
+        <span style="font-weight:700;font-size:20px;color:${avgColor(totalAvg)}">${fmtAvg(totalAvg)}</span>
+    </div>`;
+    avgHtml += '</div>';
+
+    // ── Build results table ──
     const byTown = {};
     for (const r of rankings) {
         if (!byTown[r.townId]) byTown[r.townId] = [];
         byTown[r.townId].push(r);
     }
 
-    let html = '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th title="Local Service Ads">LSA</th><th title="Pay-Per-Click Ads">PPC</th><th title="Google Map Pack">Map</th><th title="Organic Results">Organic</th><th>Found</th><th></th></tr></thead><tbody>';
+    let html = avgHtml + '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th title="Local Service Ads">LSA</th><th title="Pay-Per-Click Ads">PPC</th><th title="Google Map Pack">Map</th><th title="Organic Results">Organic</th><th>Found</th><th></th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
