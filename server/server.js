@@ -1,10 +1,56 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+
+// Serve index.html from parent directory
+app.use(express.static(path.join(__dirname, '..')));
+
+// ============================================================
+// DATA PERSISTENCE (JSON file)
+// ============================================================
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'projects.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// GET /data — load all project data
+app.get('/data', (req, res) => {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const raw = fs.readFileSync(DATA_FILE, 'utf8');
+            res.json(JSON.parse(raw));
+        } else {
+            res.json({ projects: [], activeProjectId: null });
+        }
+    } catch (err) {
+        console.error('Error reading data file:', err.message);
+        res.json({ projects: [], activeProjectId: null });
+    }
+});
+
+// PUT /data — save all project data
+app.put('/data', (req, res) => {
+    try {
+        const d = req.body;
+        if (!d || !Array.isArray(d.projects)) {
+            return res.status(400).json({ error: 'Invalid data format' });
+        }
+        fs.writeFileSync(DATA_FILE, JSON.stringify(d), 'utf8');
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('Error writing data file:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 let browser = null;
 

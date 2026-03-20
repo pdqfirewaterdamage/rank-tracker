@@ -873,6 +873,7 @@
 // DATA STORE
 // ============================================================
 const STORAGE_KEY = 'rankTracker_v2';
+const SERVER_URL = window.location.origin;
 
 function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -882,6 +883,36 @@ function loadData() {
 
 function saveData(d) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+    // Persist to server in background
+    saveToServer(d);
+}
+
+let _saveTimeout = null;
+function saveToServer(d) {
+    // Debounce server writes to avoid hammering during rapid saves
+    clearTimeout(_saveTimeout);
+    _saveTimeout = setTimeout(() => {
+        fetch(SERVER_URL + '/data', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(d)
+        }).catch(err => console.warn('Server save failed (offline?):', err.message));
+    }, 300);
+}
+
+async function loadFromServer() {
+    try {
+        const res = await fetch(SERVER_URL + '/data');
+        if (res.ok) {
+            const serverData = await res.json();
+            if (serverData && Array.isArray(serverData.projects) && serverData.projects.length > 0) {
+                return serverData;
+            }
+        }
+    } catch (e) {
+        console.warn('Server load failed (offline?):', e.message);
+    }
+    return null;
 }
 
 let data = loadData();
@@ -2881,10 +2912,50 @@ function getRankByType(r, type) {
 // ============================================================
 // INIT
 // ============================================================
+
+// Initial render with localStorage data (instant)
 renderProjects();
 updateProjectBar();
 updateApiKeyStatus();
 loadBusinessDomain();
+
+// Then load from server and refresh if server has data
+(async function initFromServer() {
+    const serverData = await loadFromServer();
+    if (serverData) {
+        const localData = loadData();
+        // Use whichever has more projects, or server if equal
+        // Also merge: if local has projects server doesn't, push to server
+        const serverIds = new Set(serverData.projects.map(p => p.id));
+        const localIds = new Set(localData.projects.map(p => p.id));
+
+        let merged = JSON.parse(JSON.stringify(serverData));
+
+        // Add any local-only projects to merged set
+        for (const lp of localData.projects) {
+            if (!serverIds.has(lp.id)) {
+                merged.projects.push(lp);
+            }
+        }
+
+        // Keep activeProjectId from server if it exists, else local
+        if (!merged.activeProjectId && localData.activeProjectId) {
+            merged.activeProjectId = localData.activeProjectId;
+        }
+
+        data = merged;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        // Push merged data back to server if we added local-only projects
+        if (merged.projects.length > serverData.projects.length) {
+            saveToServer(data);
+        }
+        renderProjects();
+        updateProjectBar();
+    } else if (data.projects.length > 0) {
+        // Server has nothing but local has data — push to server
+        saveToServer(data);
+    }
+})();
 </script>
 
 </body>
