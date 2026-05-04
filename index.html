@@ -2282,12 +2282,25 @@ async function runScan() {
                 }
 
                 const result = await resp.json();
-                const organic = result.organic || [];
                 // Serper response shape: `ads` = sponsored/PPC, `places` = Map Pack.
                 // Local Service Ads (LSA) are NOT returned by the Serper /search endpoint —
                 // those still require running serve.ps1 locally for a real Puppeteer scrape.
-                const ads    = result.ads    || result.topAds || [];
-                const places = result.places || [];
+                // Defensive array coercion: Serper occasionally returns ads as
+                // { top: [...], bottom: [...] } instead of a flat array, and any
+                // unexpected shape used to crash the whole task with TypeError on .slice().
+                const asArr = (v) => {
+                    if (Array.isArray(v)) return v;
+                    if (v && Array.isArray(v.top)) return v.top.concat(Array.isArray(v.bottom) ? v.bottom : []);
+                    return [];
+                };
+                const organic = asArr(result.organic);
+                const ads     = asArr(result.ads || result.topAds);
+                const places  = asArr(result.places);
+                if (typeof window._serperDebugLogged === 'undefined') {
+                    window._serperDebugLogged = true;
+                    console.log('Serper response keys:', Object.keys(result));
+                    console.log('First-task counts → organic:', organic.length, 'ads:', ads.length, 'places:', places.length);
+                }
 
                 // Find organic rank — uses URL-host-aware matching
                 for (let i = 0; i < organic.length; i++) {
@@ -2366,7 +2379,7 @@ async function runScan() {
 
         } catch (e) {
             if (e.message === 'INVALID_KEY') throw e;
-            console.error('Fetch error for', query, e);
+            console.error('Fetch error for', query, e && (e.stack || e.message || e));
             errors++;
         }
     }
