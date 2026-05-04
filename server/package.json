@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Local screenshot server for PDQ Rank Tracker",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "serp": "node serp-cli.js"
   },
   "dependencies": {
     "express": "^4.21.0",

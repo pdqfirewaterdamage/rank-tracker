@@ -141,12 +141,36 @@ app.post('/screenshot', async (req, res) => {
     }
 });
 
+// URL-host-aware business matching (mirrors the client helper)
+function getHostname(url) {
+    try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); }
+    catch (e) { return ''; }
+}
+function matchesBusiness(terms, title, link, snippet) {
+    if (!terms || terms.length === 0) return false;
+    const t = (title || '').toLowerCase();
+    const l = (link || '').toLowerCase();
+    const s = (snippet || '').toLowerCase();
+    const host = getHostname(link);
+    for (const term of terms) {
+        if (!term) continue;
+        if (term.includes('.')) {
+            const dom = term.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+            if (host === dom || host.endsWith('.' + dom)) return true;
+            if (l.includes(dom)) return true;
+        } else {
+            if (t.includes(term) || l.includes(term) || s.includes(term)) return true;
+        }
+    }
+    return false;
+}
+
 // Full scrape endpoint: extracts LSA, PPC, Map Pack, Organic + screenshot
 app.post('/scrape', async (req, res) => {
     const { query, businessTerms } = req.body;
     if (!query) return res.status(400).json({ error: 'Missing query' });
 
-    const terms = (businessTerms || []).map(t => t.toLowerCase());
+    const terms = (businessTerms || []).map(t => String(t).toLowerCase().trim()).filter(Boolean);
     let page = null;
 
     try {
@@ -270,12 +294,12 @@ app.post('/scrape', async (req, res) => {
 
         await page.close();
 
-        // Find business rank in each section
+        // Find business rank in each section (URL-host-aware)
         function findRank(results) {
             for (let i = 0; i < results.length; i++) {
-                const text = (results[i].title + ' ' + (results[i].link || '') + ' ' + (results[i].snippet || '')).toLowerCase();
-                if (terms.some(t => text.includes(t))) {
-                    return { rank: i + 1, title: results[i].title, url: results[i].link || '' };
+                const r = results[i];
+                if (matchesBusiness(terms, r.title, r.link, r.snippet)) {
+                    return { rank: i + 1, title: r.title, url: r.link || '' };
                 }
             }
             return { rank: 0, title: '', url: '' };

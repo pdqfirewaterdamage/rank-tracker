@@ -634,13 +634,14 @@
                     <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility()">Show</button>
                 </div>
                 <div id="api-key-status" style="font-size:12px;color:var(--text-dim)"></div>
+                <div id="server-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">Server: checking…</div>
             </div>
             <div class="card" style="margin-bottom:0">
                 <h2>Run Scan</h2>
                 <div style="display:flex;gap:8px;align-items:end;margin-bottom:8px">
                     <div style="flex:1">
-                        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Business Name / Domain</label>
-                        <input type="text" id="business-domain" placeholder="e.g., pdqrestoration.com">
+                        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Business Domains / Brand Words <span style="color:var(--text-dim);font-weight:400">(comma separated, multiple allowed)</span></label>
+                        <input type="text" id="business-domain" placeholder="pdqrestoration.com, pdqfirewaterdamage.com, pdq" title="Any result on a listed domain (or any subdomain of it) will count as your ranking. Bare brand words like 'pdq' match anywhere in the title/URL/snippet.">
                     </div>
                     <button class="btn btn-primary btn-sm" id="run-scan-btn" onclick="runScan()" style="height:40px;white-space:nowrap">Run Scan</button>
                     <button class="btn btn-outline btn-sm" onclick="clearRankings()" style="height:40px">Clear</button>
@@ -873,7 +874,13 @@
 // DATA STORE
 // ============================================================
 const STORAGE_KEY = 'rankTracker_v2';
-const SERVER_URL = window.location.origin;
+// Always talk to the Node server on :3456. If the page itself is served from
+// :3456, use the same origin; otherwise fall back to localhost:3456 (CORS is
+// enabled server-side). This means persistence works whether the page was
+// opened via http://localhost:3456 or from a static host on a different port.
+const SERVER_URL = (window.location.port === '3456')
+    ? window.location.origin
+    : 'http://localhost:3456';
 
 function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -888,6 +895,7 @@ function saveData(d) {
 }
 
 let _saveTimeout = null;
+let _lastServerSaveOk = null;
 function saveToServer(d) {
     // Debounce server writes to avoid hammering during rapid saves
     clearTimeout(_saveTimeout);
@@ -896,21 +904,50 @@ function saveToServer(d) {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(d)
-        }).catch(err => console.warn('Server save failed (offline?):', err.message));
+        }).then(r => {
+            const ok = r.ok;
+            if (ok !== _lastServerSaveOk) {
+                _lastServerSaveOk = ok;
+                updateServerStatus(ok);
+            }
+            if (!ok) console.warn('Server save returned', r.status);
+        }).catch(err => {
+            if (_lastServerSaveOk !== false) {
+                _lastServerSaveOk = false;
+                updateServerStatus(false);
+            }
+            console.warn('Server save failed (Node server not running?):', err.message);
+        });
     }, 300);
+}
+
+function updateServerStatus(ok) {
+    const el = document.getElementById('server-status');
+    if (!el) return;
+    if (ok) {
+        el.textContent = 'Server: connected (saving to disk)';
+        el.style.color = 'var(--green)';
+    } else {
+        el.textContent = 'Server: not reachable on :3456 — projects only saved in this browser. Run start-screenshot-server.ps1 (or serve.ps1).';
+        el.style.color = 'var(--orange)';
+    }
 }
 
 async function loadFromServer() {
     try {
         const res = await fetch(SERVER_URL + '/data');
         if (res.ok) {
+            _lastServerSaveOk = true;
+            updateServerStatus(true);
             const serverData = await res.json();
             if (serverData && Array.isArray(serverData.projects) && serverData.projects.length > 0) {
                 return serverData;
             }
         }
     } catch (e) {
-        console.warn('Server load failed (offline?):', e.message);
+        _lastServerSaveOk = false;
+        updateServerStatus(false);
+        console.warn('Server load failed (Node server not running?):', e.message);
     }
     return null;
 }
@@ -1858,6 +1895,50 @@ function loadBusinessDomain() {
 }
 
 // ============================================================
+// BUSINESS MATCHING
+// A "business term" can be:
+//   - a domain like "pdqrestoration.com" — matches that domain and ANY subdomain
+//   - a bare brand word like "pdq" — matches any URL/title/snippet containing it
+// Multiple terms can be comma- or newline-separated.
+// ============================================================
+function parseBusinessTerms(raw) {
+    if (!raw) return [];
+    return raw.toLowerCase()
+        .split(/[,\n]/)
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+function getHostname(url) {
+    try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); }
+    catch (e) { return ''; }
+}
+
+// Returns true if any term matches the result.
+function matchesBusinessTerms(terms, title, link, snippet) {
+    if (!terms || terms.length === 0) return false;
+    const t = (title || '').toLowerCase();
+    const l = (link || '').toLowerCase();
+    const s = (snippet || '').toLowerCase();
+    const host = getHostname(link);
+
+    for (const term of terms) {
+        if (!term) continue;
+        if (term.includes('.')) {
+            // Domain-style term: match the host or any subdomain of it
+            const dom = term.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+            if (host === dom || host.endsWith('.' + dom)) return true;
+            // Also still allow substring-on-link as a fallback for weird URLs
+            if (l.includes(dom)) return true;
+        } else {
+            // Brand word: substring match anywhere
+            if (t.includes(term) || l.includes(term) || s.includes(term)) return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================
 // SEARCH MODE (Named vs Geo-located)
 // ============================================================
 let currentScanMode = 'named'; // 'named' or 'geo'
@@ -1942,8 +2023,8 @@ async function runScan() {
         console.log('Screenshot server not available, skipping screenshots');
     }
 
-    // Search terms to match against (lowercase)
-    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    // Search terms to match against (lowercase). Supports comma- or newline-separated.
+    const searchTerms = parseBusinessTerms(businessDomain);
 
     const scanMode = currentScanMode;
     const PARALLEL = 5;
@@ -1983,7 +2064,7 @@ async function runScan() {
                         const scrapeData = await scrapeResp.json();
                         screenshot = scrapeData.screenshot || '';
 
-                        // Use server-side rank matching
+                        // Use server-side rank matching as a starting point ...
                         rankLsa = scrapeData.ranks.lsa.rank || 0;
                         rankPpc = scrapeData.ranks.ppc.rank || 0;
                         rankMap = scrapeData.ranks.map.rank || 0;
@@ -1992,6 +2073,31 @@ async function runScan() {
                         rank = rankOrganic;
                         foundUrl = scrapeData.ranks.organic.url || '';
                         foundTitle = scrapeData.ranks.organic.title || '';
+
+                        // ... then re-check with the URL-host-aware client matcher
+                        // so we catch subdomains the server's substring scan missed.
+                        const reMatch = (arr) => {
+                            for (let i = 0; i < arr.length; i++) {
+                                const e = arr[i];
+                                if (matchesBusinessTerms(searchTerms, e.title, e.link, e.snippet)) {
+                                    return { rank: i + 1, url: e.link || '', title: e.title || '' };
+                                }
+                            }
+                            return null;
+                        };
+                        const orgMatch = reMatch(scrapeData.serpData.organic || []);
+                        if (orgMatch && (rankOrganic >= 20 || orgMatch.rank < rankOrganic)) {
+                            rankOrganic = orgMatch.rank;
+                            rank = orgMatch.rank;
+                            foundUrl = orgMatch.url;
+                            foundTitle = orgMatch.title;
+                        }
+                        const lsaMatch = reMatch(scrapeData.serpData.lsa || []);
+                        if (lsaMatch && (!rankLsa || lsaMatch.rank < rankLsa)) rankLsa = lsaMatch.rank;
+                        const ppcMatch = reMatch(scrapeData.serpData.ppc || []);
+                        if (ppcMatch && (!rankPpc || ppcMatch.rank < rankPpc)) rankPpc = ppcMatch.rank;
+                        const mapMatch = reMatch(scrapeData.serpData.mapPack || []);
+                        if (mapMatch && (!rankMap || mapMatch.rank < rankMap)) rankMap = mapMatch.rank;
 
                         // Build topResults from scraped organic
                         topResults = (scrapeData.serpData.organic || []).slice(0, 20).map((e, idx) => ({
@@ -2040,13 +2146,10 @@ async function runScan() {
                 const result = await resp.json();
                 const organic = result.organic || [];
 
-                // Find organic rank
+                // Find organic rank — uses URL-host-aware matching
                 for (let i = 0; i < organic.length; i++) {
                     const entry = organic[i];
-                    const title = (entry.title || '').toLowerCase();
-                    const link = (entry.link || '').toLowerCase();
-                    const snippet = (entry.snippet || '').toLowerCase();
-                    if (searchTerms.some(term => title.includes(term) || link.includes(term) || snippet.includes(term))) {
+                    if (matchesBusinessTerms(searchTerms, entry.title, entry.link, entry.snippet)) {
                         rank = i + 1;
                         rankOrganic = i + 1;
                         foundUrl = entry.link || '';
@@ -2311,7 +2414,7 @@ function showSearchPreview(keyword, townId, catId) {
     const query = ranking.query || (keyword + ' ' + (town ? town.name : ''));
     const googleUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
     const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
-    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    const searchTerms = parseBusinessTerms(businessDomain);
 
     document.getElementById('search-preview-title').textContent = query;
     document.getElementById('search-preview-subtitle').textContent =
@@ -2364,11 +2467,7 @@ function showSearchPreview(keyword, townId, catId) {
         `;
 
         for (const result of topResults) {
-            const isMatch = searchTerms.some(term =>
-                result.title.toLowerCase().includes(term) ||
-                result.link.toLowerCase().includes(term) ||
-                result.snippet.toLowerCase().includes(term)
-            );
+            const isMatch = matchesBusinessTerms(searchTerms, result.title, result.link, result.snippet);
 
             // Parse domain from URL
             let domain = '';
@@ -2464,7 +2563,7 @@ function detectTitleMismatches() {
     if (!proj) return [];
 
     const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
-    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    const searchTerms = parseBusinessTerms(businessDomain);
     const mismatches = [];
 
     // Words that commonly appear together but indicate a mismatch when the keyword doesn't include them
@@ -2481,10 +2580,7 @@ function detectTitleMismatches() {
     for (const ranking of proj.rankings) {
         if (!ranking.foundUrl || !ranking.foundTitle) continue;
         // Only check our own pages
-        const isOurs = searchTerms.some(term =>
-            ranking.foundUrl.toLowerCase().includes(term) ||
-            ranking.foundTitle.toLowerCase().includes(term)
-        );
+        const isOurs = matchesBusinessTerms(searchTerms, ranking.foundTitle, ranking.foundUrl, '');
         if (!isOurs) continue;
 
         const titleLower = ranking.foundTitle.toLowerCase();
@@ -2610,7 +2706,7 @@ function renderSerpPage() {
     }
 
     const businessDomain = localStorage.getItem(BUSINESS_STORAGE) || '';
-    const searchTerms = businessDomain.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+    const searchTerms = parseBusinessTerms(businessDomain);
 
     let html = '';
     for (const ranking of rankings) {
@@ -2643,11 +2739,7 @@ function renderSerpPage() {
         } else if (topResults.length > 0) {
             html += `<div style="background:white;border-radius:8px;overflow:hidden;padding:16px 20px;max-height:500px;overflow-y:auto">`;
             for (const result of topResults) {
-                const isMatch = searchTerms.some(term =>
-                    result.title.toLowerCase().includes(term) ||
-                    result.link.toLowerCase().includes(term) ||
-                    result.snippet.toLowerCase().includes(term)
-                );
+                const isMatch = matchesBusinessTerms(searchTerms, result.title, result.link, result.snippet);
                 let domain = '';
                 try { domain = new URL(result.link).hostname; } catch(e) { domain = result.link; }
                 const highlight = isMatch ? 'border-left:3px solid #00b894;padding-left:10px;background:#f0fdf9;border-radius:4px;padding-top:6px;padding-bottom:6px;padding-right:6px' : '';
