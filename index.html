@@ -2500,8 +2500,7 @@ function renderResults() {
 
         avgHtml += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px">
             <div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--text)">${cat ? esc(cat.name) : 'Unknown'}</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
-                <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">LSA</div>${avgCell(lsaAvg)}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
                 <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">PPC</div>${avgCell(ppcAvg)}</div>
                 <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Map</div>${avgCell(mapAvg)}</div>
                 <div><div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Organic</div>${avgCell(organicAvg)}</div>
@@ -2526,7 +2525,7 @@ function renderResults() {
         byTown[r.townId].push(r);
     }
 
-    let html = avgHtml + '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th title="Local Service Ads">LSA</th><th title="Pay-Per-Click Ads">PPC</th><th title="Google Map Pack">Map</th><th title="Organic Results">Organic</th><th>Found</th><th></th></tr></thead><tbody>';
+    let html = avgHtml + '<div style="max-height:600px;overflow-y:auto"><table><thead><tr><th>Town</th><th>Category</th><th>Keyword</th><th>Mode</th><th title="Pay-Per-Click Ads">PPC</th><th title="Google Map Pack">Map</th><th title="Organic Results">Organic</th><th>Found</th><th></th></tr></thead><tbody>';
 
     for (const townId of Object.keys(byTown)) {
         const town = proj.towns.find(t => t.id === townId);
@@ -2546,7 +2545,6 @@ function renderResults() {
                 <td>${cat ? esc(cat.name) : '—'}</td>
                 <td>${esc(r.keyword)}</td>
                 <td>${modeLabel}</td>
-                <td>${rankBadge(r.rankLsa || 0)}</td>
                 <td>${rankBadge(r.rankPpc || 0)}</td>
                 <td>${rankBadge(r.rankMap || 0)}</td>
                 <td>${rankBadge(r.rankOrganic || r.rank || 20)}</td>
@@ -3070,7 +3068,6 @@ function renderCategoryMaps() {
                         <option value="organic">Organic</option>
                         <option value="map">Map Pack</option>
                         <option value="ppc">PPC</option>
-                        <option value="lsa">LSA</option>
                         <option value="best">Best</option>
                     </select>
                 </div>
@@ -3133,14 +3130,13 @@ function renderCategoryResults(catId, kwFilter) {
         return;
     }
 
-    let html = '<table style="font-size:12px"><thead><tr><th>Town</th><th>Keyword</th><th title="LSA">L</th><th title="PPC">P</th><th title="Map">M</th><th title="Organic">O</th></tr></thead><tbody>';
+    let html = '<table style="font-size:12px"><thead><tr><th>Town</th><th>Keyword</th><th title="PPC">P</th><th title="Map">M</th><th title="Organic">O</th></tr></thead><tbody>';
     for (const r of rankings) {
         const town = proj.towns.find(t => t.id === r.townId);
         if (!town) continue;
         html += `<tr>
             <td>${esc(town.name)}</td>
             <td>${esc(r.keyword)}</td>
-            <td>${rankBadge(r.rankLsa || 0, 'sm')}</td>
             <td>${rankBadge(r.rankPpc || 0, 'sm')}</td>
             <td>${rankBadge(r.rankMap || 0, 'sm')}</td>
             <td>${rankBadge(r.rankOrganic || r.rank || 20, 'sm')}</td>
@@ -3203,19 +3199,19 @@ function populateCategoryMap(catId, kwFilter, rankType) {
             })
         }).addTo(map);
 
-        const typeLabels = { lsa: 'LSA', ppc: 'PPC', map: 'Map', organic: 'Org' };
+        const typeLabels = { ppc: 'PPC', map: 'Map', organic: 'Org' };
         const popupContent = `
             <div class="popup-title">${esc(town.name)}</div>
             <div style="color:var(--text-dim);font-size:12px;margin-bottom:6px">${esc(cat.name)}</div>
             <table style="width:100%;font-size:11px;border-collapse:collapse">
-                <tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 4px">Keyword</th><th style="padding:2px 3px">LSA</th><th style="padding:2px 3px">PPC</th><th style="padding:2px 3px">Map</th><th style="padding:2px 3px">Org</th></tr>
+                <tr style="color:var(--text-dim)"><th style="text-align:left;padding:2px 4px">Keyword</th><th style="padding:2px 3px">PPC</th><th style="padding:2px 3px">Map</th><th style="padding:2px 3px">Org</th></tr>
                 ${relevantRankings.map(r => {
                     function miniRank(v) {
                         if (!v || v === 0) return '<span style="color:#666">—</span>';
                         const c = v <= 3 ? '#00b894' : v <= 6 ? '#fdcb6e' : '#e17055';
                         return `<span style="color:${c};font-weight:700">${v >= 20 ? '20+' : v}</span>`;
                     }
-                    return `<tr><td style="padding:2px 4px">${esc(r.keyword)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankLsa)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankPpc)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankMap)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankOrganic || r.rank)}</td></tr>`;
+                    return `<tr><td style="padding:2px 4px">${esc(r.keyword)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankPpc)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankMap)}</td><td style="text-align:center;padding:2px 3px">${miniRank(r.rankOrganic || r.rank)}</td></tr>`;
                 }).join('')}
             </table>
         `;
@@ -3249,12 +3245,11 @@ function rankBadge(val, size) {
 // Get a specific rank type from a ranking object
 function getRankByType(r, type) {
     switch(type) {
-        case 'lsa': return r.rankLsa || 0;
         case 'ppc': return r.rankPpc || 0;
         case 'map': return r.rankMap || 0;
         case 'organic': return r.rankOrganic || r.rank || 20;
         case 'best':
-            const vals = [r.rankLsa, r.rankPpc, r.rankMap, r.rankOrganic || r.rank].filter(v => v && v > 0);
+            const vals = [r.rankPpc, r.rankMap, r.rankOrganic || r.rank].filter(v => v && v > 0);
             return vals.length > 0 ? Math.min(...vals) : 20;
         default: return r.rankOrganic || r.rank || 20;
     }
