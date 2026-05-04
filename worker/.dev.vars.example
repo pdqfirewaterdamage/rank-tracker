@@ -1,0 +1,3 @@
+# Copy this to `.dev.vars` (gitignored) and fill in.
+# Used by `wrangler dev` for local Worker testing only.
+AUTH_SECRET=put-a-long-random-string-here

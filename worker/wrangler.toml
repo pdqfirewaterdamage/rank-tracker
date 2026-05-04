@@ -1,0 +1,19 @@
+name = "ranktracker-api"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+# KV namespace binding. Replace `id` with the value `wrangler kv:namespace create RANK_DATA`
+# prints. The `preview_id` is for `wrangler dev` (local). You can use the same id for both
+# while solo, or create a second namespace for staging.
+[[kv_namespaces]]
+binding = "RANK_DATA"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# CORS allowlist — comma-separated. Add the GitHub Pages origin and any custom domain.
+[vars]
+ALLOWED_ORIGINS = "https://pdqfirewaterdamage.github.io,http://localhost:3456,http://localhost:8080"
+
+# AUTH_SECRET is set as a Worker secret, not a plain var:
+#   wrangler secret put AUTH_SECRET
+# (you'll be prompted for the value — pick a long random string)

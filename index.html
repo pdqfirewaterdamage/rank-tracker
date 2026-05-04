@@ -634,7 +634,10 @@
                     <button class="btn btn-outline btn-sm" onclick="toggleKeyVisibility()">Show</button>
                 </div>
                 <div id="api-key-status" style="font-size:12px;color:var(--text-dim)"></div>
-                <div id="server-status" style="font-size:11px;color:var(--text-dim);margin-top:4px">Server: checking…</div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                    <div id="server-status" style="font-size:11px;color:var(--text-dim);flex:1">Server: checking…</div>
+                    <button class="btn btn-outline btn-sm" onclick="openCloudBackendDialog()" style="font-size:11px;padding:3px 8px">Cloud Backend</button>
+                </div>
             </div>
             <div class="card" style="margin-bottom:0">
                 <h2>Run Scan</h2>
@@ -874,13 +877,37 @@
 // DATA STORE
 // ============================================================
 const STORAGE_KEY = 'rankTracker_v2';
-// Always talk to the Node server on :3456. If the page itself is served from
-// :3456, use the same origin; otherwise fall back to localhost:3456 (CORS is
-// enabled server-side). This means persistence works whether the page was
-// opened via http://localhost:3456 or from a static host on a different port.
-const SERVER_URL = (window.location.port === '3456')
-    ? window.location.origin
-    : 'http://localhost:3456';
+const WORKER_URL_KEY = 'rankTracker_workerUrl';
+const WORKER_SECRET_KEY = 'rankTracker_workerSecret';
+
+// Backend selection:
+//   - On localhost (port 3456 or 8080) → talk to the local Node server.
+//   - On any other host (e.g. github.io) → talk to the Cloudflare Worker
+//     whose URL is in localStorage (set via the "Cloud Backend" UI).
+// The local server doesn't need auth. The Cloud Worker requires X-Auth.
+function getBackend() {
+    const onLocal = window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1';
+    if (onLocal) {
+        const sameOrigin = window.location.port === '3456';
+        return {
+            kind: 'local',
+            url: sameOrigin ? window.location.origin : 'http://localhost:3456',
+            secret: null
+        };
+    }
+    return {
+        kind: 'cloud',
+        url: (localStorage.getItem(WORKER_URL_KEY) || '').replace(/\/+$/, ''),
+        secret: localStorage.getItem(WORKER_SECRET_KEY) || ''
+    };
+}
+
+function backendHeaders(backend) {
+    const h = { 'Content-Type': 'application/json' };
+    if (backend.kind === 'cloud' && backend.secret) h['X-Auth'] = backend.secret;
+    return h;
+}
 
 function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -890,66 +917,142 @@ function loadData() {
 
 function saveData(d) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-    // Persist to server in background
+    // Persist to backend in background
     saveToServer(d);
 }
 
 let _saveTimeout = null;
 let _lastServerSaveOk = null;
 function saveToServer(d) {
+    const backend = getBackend();
+    if (!backend.url) {
+        // No cloud backend configured and not on localhost — nothing to do.
+        if (_lastServerSaveOk !== false) {
+            _lastServerSaveOk = false;
+            updateServerStatus(false, backend);
+        }
+        return;
+    }
     // Debounce server writes to avoid hammering during rapid saves
     clearTimeout(_saveTimeout);
     _saveTimeout = setTimeout(() => {
-        fetch(SERVER_URL + '/data', {
+        fetch(backend.url + '/data', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: backendHeaders(backend),
             body: JSON.stringify(d)
         }).then(r => {
             const ok = r.ok;
             if (ok !== _lastServerSaveOk) {
                 _lastServerSaveOk = ok;
-                updateServerStatus(ok);
+                updateServerStatus(ok, backend, r.status);
             }
             if (!ok) console.warn('Server save returned', r.status);
         }).catch(err => {
             if (_lastServerSaveOk !== false) {
                 _lastServerSaveOk = false;
-                updateServerStatus(false);
+                updateServerStatus(false, backend);
             }
-            console.warn('Server save failed (Node server not running?):', err.message);
+            console.warn('Server save failed:', err.message);
         });
     }, 300);
 }
 
-function updateServerStatus(ok) {
+function updateServerStatus(ok, backend, status) {
     const el = document.getElementById('server-status');
     if (!el) return;
+    backend = backend || getBackend();
     if (ok) {
-        el.textContent = 'Server: connected (saving to disk)';
+        el.textContent = backend.kind === 'cloud'
+            ? 'Cloud backend: connected (saving to Cloudflare)'
+            : 'Local server: connected (saving to disk)';
         el.style.color = 'var(--green)';
+    } else if (backend.kind === 'local') {
+        el.textContent = 'Local server: not reachable on :3456 — projects only saved in this browser. Run serve.ps1.';
+        el.style.color = 'var(--orange)';
+    } else if (!backend.url) {
+        el.textContent = 'Cloud backend: not configured — click "Cloud Backend" to connect, or run locally with serve.ps1.';
+        el.style.color = 'var(--orange)';
+    } else if (status === 401) {
+        el.textContent = 'Cloud backend: wrong secret (401). Click "Cloud Backend" to fix.';
+        el.style.color = 'var(--orange)';
     } else {
-        el.textContent = 'Server: not reachable on :3456 — projects only saved in this browser. Run start-screenshot-server.ps1 (or serve.ps1).';
+        el.textContent = 'Cloud backend: not reachable. Click "Cloud Backend" to check the URL.';
         el.style.color = 'var(--orange)';
     }
 }
 
 async function loadFromServer() {
+    const backend = getBackend();
+    if (!backend.url) {
+        updateServerStatus(false, backend);
+        return null;
+    }
     try {
-        const res = await fetch(SERVER_URL + '/data');
+        const res = await fetch(backend.url + '/data', { headers: backendHeaders(backend) });
         if (res.ok) {
             _lastServerSaveOk = true;
-            updateServerStatus(true);
+            updateServerStatus(true, backend);
             const serverData = await res.json();
             if (serverData && Array.isArray(serverData.projects) && serverData.projects.length > 0) {
                 return serverData;
             }
+        } else {
+            _lastServerSaveOk = false;
+            updateServerStatus(false, backend, res.status);
         }
     } catch (e) {
         _lastServerSaveOk = false;
-        updateServerStatus(false);
-        console.warn('Server load failed (Node server not running?):', e.message);
+        updateServerStatus(false, backend);
+        console.warn('Server load failed:', e.message);
     }
     return null;
+}
+
+// ============================================================
+// CLOUD BACKEND CONFIG (Cloudflare Worker)
+// ============================================================
+function openCloudBackendDialog() {
+    const url = localStorage.getItem(WORKER_URL_KEY) || '';
+    const secret = localStorage.getItem(WORKER_SECRET_KEY) || '';
+    const newUrl = prompt('Cloudflare Worker URL\n(e.g. https://ranktracker-api.your-account.workers.dev)\n\nLeave blank to disconnect.', url);
+    if (newUrl === null) return; // cancelled
+    const trimmedUrl = newUrl.trim().replace(/\/+$/, '');
+    if (!trimmedUrl) {
+        localStorage.removeItem(WORKER_URL_KEY);
+        localStorage.removeItem(WORKER_SECRET_KEY);
+        updateServerStatus(false, getBackend());
+        alert('Cloud backend disconnected.');
+        return;
+    }
+    const newSecret = prompt('Shared secret\n(the AUTH_SECRET you set on the Worker)', secret);
+    if (newSecret === null) return;
+    localStorage.setItem(WORKER_URL_KEY, trimmedUrl);
+    localStorage.setItem(WORKER_SECRET_KEY, newSecret.trim());
+    // Probe immediately so the user gets feedback
+    (async () => {
+        const probe = await loadFromServer();
+        if (_lastServerSaveOk) {
+            // If the cloud already has data, prefer it (and merge any local-only projects)
+            if (probe) {
+                const localData = loadData();
+                const serverIds = new Set(probe.projects.map(p => p.id));
+                let merged = JSON.parse(JSON.stringify(probe));
+                for (const lp of localData.projects) {
+                    if (!serverIds.has(lp.id)) merged.projects.push(lp);
+                }
+                if (!merged.activeProjectId && localData.activeProjectId) {
+                    merged.activeProjectId = localData.activeProjectId;
+                }
+                data = merged;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                renderProjects();
+                updateProjectBar();
+            }
+            // Push current local data up so the cloud has it
+            saveToServer(data);
+            alert('Connected. Your projects will now sync to Cloudflare.');
+        }
+    })();
 }
 
 let data = loadData();
