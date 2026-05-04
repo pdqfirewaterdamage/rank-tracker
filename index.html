@@ -2255,39 +2255,38 @@ async function runScan() {
                 }
             }
 
-            // Fallback: use Serper API for organic results if scrape didn't work
+            // Fallback: use Serper API. Two endpoints in parallel:
+            //   /search → organic + (sometimes) ads
+            //   /places → Map Pack (Serper's /search does NOT reliably include `places`)
+            // For the richest SERP data — including LSA — run serve.ps1 locally; the
+            // Puppeteer scrape supplies all four sections plus a screenshot.
             if (topResults.length === 0) {
-                const serperBody = { q: query, num: 20, gl: 'us' };
-                if (scanMode === 'geo') {
-                    serperBody.location = town.name;
-                }
+                const baseBody = { q: query, num: 20, gl: 'us' };
+                if (scanMode === 'geo') baseBody.location = town.name;
+                const headers = { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' };
 
-                const resp = await fetch('https://google.serper.dev/search', {
-                    method: 'POST',
-                    headers: {
-                        'X-API-KEY': apiKey,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(serperBody)
-                });
+                const [searchResp, placesResp] = await Promise.all([
+                    fetch('https://google.serper.dev/search', { method: 'POST', headers, body: JSON.stringify(baseBody) }),
+                    fetch('https://google.serper.dev/places', { method: 'POST', headers, body: JSON.stringify(baseBody) })
+                ]);
 
-                if (!resp.ok) {
-                    const errText = await resp.text();
-                    console.error('Serper error:', resp.status, errText);
+                if (!searchResp.ok) {
+                    const errText = await searchResp.text();
+                    console.error('Serper /search error:', searchResp.status, errText);
                     errors++;
-                    if (resp.status === 401 || resp.status === 403) {
+                    if (searchResp.status === 401 || searchResp.status === 403) {
                         throw new Error('INVALID_KEY');
                     }
                     return;
                 }
 
-                const result = await resp.json();
-                // Serper response shape: `ads` = sponsored/PPC, `places` = Map Pack.
-                // Local Service Ads (LSA) are NOT returned by the Serper /search endpoint —
-                // those still require running serve.ps1 locally for a real Puppeteer scrape.
-                // Defensive array coercion: Serper occasionally returns ads as
-                // { top: [...], bottom: [...] } instead of a flat array, and any
-                // unexpected shape used to crash the whole task with TypeError on .slice().
+                const result = await searchResp.json();
+                let placesResult = {};
+                if (placesResp.ok) placesResult = await placesResp.json();
+                else console.warn('Serper /places error:', placesResp.status);
+
+                // Defensive array coercion: Serper sometimes returns ads as
+                // { top: [...], bottom: [...] } instead of a flat array.
                 const asArr = (v) => {
                     if (Array.isArray(v)) return v;
                     if (v && Array.isArray(v.top)) return v.top.concat(Array.isArray(v.bottom) ? v.bottom : []);
@@ -2295,10 +2294,11 @@ async function runScan() {
                 };
                 const organic = asArr(result.organic);
                 const ads     = asArr(result.ads || result.topAds);
-                const places  = asArr(result.places);
+                const places  = asArr(placesResult.places);
                 if (typeof window._serperDebugLogged === 'undefined') {
                     window._serperDebugLogged = true;
-                    console.log('Serper response keys:', Object.keys(result));
+                    console.log('Serper /search keys:', Object.keys(result));
+                    console.log('Serper /places keys:', Object.keys(placesResult));
                     console.log('First-task counts → organic:', organic.length, 'ads:', ads.length, 'places:', places.length);
                 }
 
