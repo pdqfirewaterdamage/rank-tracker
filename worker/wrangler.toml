@@ -7,8 +7,8 @@ compatibility_date = "2024-12-01"
 # while solo, or create a second namespace for staging.
 [[kv_namespaces]]
 binding = "RANK_DATA"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "83d9cbc2a2d94f3fbe5223bb4cebc678"
+preview_id = "83d9cbc2a2d94f3fbe5223bb4cebc678"
 
 # CORS allowlist — comma-separated. Add the GitHub Pages origin and any custom domain.
 [vars]
