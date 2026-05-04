@@ -880,12 +880,26 @@ const STORAGE_KEY = 'rankTracker_v2';
 const WORKER_URL_KEY = 'rankTracker_workerUrl';
 const WORKER_SECRET_KEY = 'rankTracker_workerSecret';
 
-// Backend selection:
-//   - On localhost (port 3456 or 8080) → talk to the local Node server.
-//   - On any other host (e.g. github.io) → talk to the Cloudflare Worker
-//     whose URL is in localStorage (set via the "Cloud Backend" UI).
-// The local server doesn't need auth. The Cloud Worker requires X-Auth.
+// Backend selection for the project /data endpoint:
+//   1. If a Cloudflare Worker URL + secret are configured → use the cloud.
+//      This ensures the same project list shows up whether you opened the page
+//      from github.io or from http://localhost:3456 (both share KV).
+//   2. Otherwise, on localhost → use the local Node server's /data endpoint
+//      (legacy single-machine mode).
+//   3. Otherwise → no backend, projects stay in this browser only.
+//
+// NOTE: this is just for project persistence. The Puppeteer /scrape endpoint
+// is always called at http://localhost:3456 directly (see runScan), so running
+// serve.ps1 still gives you LSA/PPC/Map Pack + screenshots even when data
+// flows through the cloud.
 function getBackend() {
+    const cloudUrl    = (localStorage.getItem(WORKER_URL_KEY) || '').replace(/\/+$/, '');
+    const cloudSecret = localStorage.getItem(WORKER_SECRET_KEY) || '';
+
+    if (cloudUrl && cloudSecret) {
+        return { kind: 'cloud', url: cloudUrl, secret: cloudSecret };
+    }
+
     const onLocal = window.location.hostname === 'localhost' ||
                     window.location.hostname === '127.0.0.1';
     if (onLocal) {
@@ -896,11 +910,8 @@ function getBackend() {
             secret: null
         };
     }
-    return {
-        kind: 'cloud',
-        url: (localStorage.getItem(WORKER_URL_KEY) || '').replace(/\/+$/, ''),
-        secret: localStorage.getItem(WORKER_SECRET_KEY) || ''
-    };
+
+    return { kind: 'cloud', url: '', secret: '' };
 }
 
 function backendHeaders(backend) {
