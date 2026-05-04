@@ -655,7 +655,7 @@
                     <button class="btn btn-sm scan-mode-btn" id="mode-geo" onclick="setScanMode('geo')" style="padding:4px 12px;font-size:12px">Geo-located</button>
                 </div>
                 <div id="scan-mode-desc" style="font-size:11px;color:var(--text-dim);margin-bottom:4px">
-                    Searches "keyword + town name" — e.g., "water damage restoration Springfield"
+                    Searches "keyword + town + state" — e.g., "water damage restoration Springfield NJ"
                 </div>
                 <div class="status-bar" id="scan-status">
                     <div class="spinner"></div>
@@ -2053,7 +2053,7 @@ function setScanMode(mode) {
     document.getElementById('mode-' + mode).classList.add('active');
     const desc = document.getElementById('scan-mode-desc');
     if (mode === 'named') {
-        desc.textContent = 'Searches "keyword + town name" \u2014 e.g., "water damage restoration Springfield"';
+        desc.textContent = 'Searches "keyword + town + state" \u2014 e.g., "water damage restoration Springfield NJ"';
     } else {
         desc.textContent = 'Searches keyword only, simulated from the town\u2019s location \u2014 e.g., "water damage restoration" from Springfield';
     }
@@ -2081,6 +2081,33 @@ function townNameOnly(fullName) {
     // Town names stored as "Springfield, New Jersey" — strip the state part
     const parts = fullName.split(',');
     return parts[0].trim();
+}
+
+// US state name → 2-letter postal code lookup (case-insensitive)
+const STATE_ABBR = {
+    'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA',
+    'colorado':'CO','connecticut':'CT','delaware':'DE','district of columbia':'DC',
+    'florida':'FL','georgia':'GA','hawaii':'HI','idaho':'ID','illinois':'IL',
+    'indiana':'IN','iowa':'IA','kansas':'KS','kentucky':'KY','louisiana':'LA',
+    'maine':'ME','maryland':'MD','massachusetts':'MA','michigan':'MI','minnesota':'MN',
+    'mississippi':'MS','missouri':'MO','montana':'MT','nebraska':'NE','nevada':'NV',
+    'new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY',
+    'north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK','oregon':'OR',
+    'pennsylvania':'PA','rhode island':'RI','south carolina':'SC','south dakota':'SD',
+    'tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT','virginia':'VA',
+    'washington':'WA','west virginia':'WV','wisconsin':'WI','wyoming':'WY',
+    'puerto rico':'PR'
+};
+
+// "Boonton, New Jersey" → "Boonton NJ"; if state isn't in the lookup, return
+// the town part only so the query is still valid.
+function townQueryString(fullName) {
+    const parts = fullName.split(',').map(s => s.trim());
+    const town = parts[0] || fullName;
+    const state = (parts[1] || '').toLowerCase();
+    if (!state) return town;
+    const abbr = STATE_ABBR[state] || (parts[1].length === 2 ? parts[1].toUpperCase() : '');
+    return abbr ? `${town} ${abbr}` : town;
 }
 
 // ============================================================
@@ -2145,13 +2172,16 @@ async function runScan() {
     // Process a single search task
     async function processTask(task) {
         const { town, cat, keyword } = task;
-        const townShort = townNameOnly(town.name);
-        const query = scanMode === 'named' ? keyword + ' ' + townShort : keyword;
+        const townQ = townQueryString(town.name);   // e.g. "Boonton NJ"
+        const query = scanMode === 'named' ? keyword + ' ' + townQ : keyword;
 
         try {
             let rank = 20, foundUrl = '', foundTitle = '';
             let rankLsa = 0, rankPpc = 0, rankMap = 0, rankOrganic = 20;
-            let topResults = [];
+            let topResults = [];     // organic
+            let topAds = [];         // PPC / sponsored
+            let topMapPack = [];     // local pack
+            let topLsa = [];         // Local Service Ads (puppeteer-only)
             let screenshot = '';
 
             // If scrape server is available, use it for full SERP data (all 4 types + screenshot)
@@ -2202,13 +2232,18 @@ async function runScan() {
                         const mapMatch = reMatch(scrapeData.serpData.mapPack || []);
                         if (mapMatch && (!rankMap || mapMatch.rank < rankMap)) rankMap = mapMatch.rank;
 
-                        // Build topResults from scraped organic
-                        topResults = (scrapeData.serpData.organic || []).slice(0, 20).map((e, idx) => ({
+                        // Build the four result lists from the scraper output
+                        const mapEntry = (e, idx) => ({
                             pos: idx + 1,
-                            title: e.title || '',
-                            link: e.link || '',
-                            snippet: e.snippet || ''
-                        }));
+                            title: e.title || e.name || '',
+                            link: e.link || e.website || '',
+                            snippet: e.snippet || e.address || '',
+                            rating: e.rating || ''
+                        });
+                        topResults  = (scrapeData.serpData.organic || []).slice(0, 20).map(mapEntry);
+                        topAds      = (scrapeData.serpData.ppc     || []).slice(0, 10).map(mapEntry);
+                        topMapPack  = (scrapeData.serpData.mapPack || []).slice(0, 10).map(mapEntry);
+                        topLsa      = (scrapeData.serpData.lsa     || []).slice(0, 10).map(mapEntry);
 
                         console.log(`Scraped [${query}] LSA:${scrapeData.serpData.lsa.length} PPC:${scrapeData.serpData.ppc.length} Map:${scrapeData.serpData.mapPack.length} Org:${scrapeData.serpData.organic.length}`);
                     } else if (scrapeResp.status === 429) {
@@ -2248,6 +2283,11 @@ async function runScan() {
 
                 const result = await resp.json();
                 const organic = result.organic || [];
+                // Serper response shape: `ads` = sponsored/PPC, `places` = Map Pack.
+                // Local Service Ads (LSA) are NOT returned by the Serper /search endpoint —
+                // those still require running serve.ps1 locally for a real Puppeteer scrape.
+                const ads    = result.ads    || result.topAds || [];
+                const places = result.places || [];
 
                 // Find organic rank — uses URL-host-aware matching
                 for (let i = 0; i < organic.length; i++) {
@@ -2261,12 +2301,46 @@ async function runScan() {
                     }
                 }
 
+                // PPC rank (Serper `ads`) — has title/link/snippet
+                for (let i = 0; i < ads.length; i++) {
+                    const a = ads[i];
+                    if (matchesBusinessTerms(searchTerms, a.title, a.link, a.snippet)) {
+                        rankPpc = i + 1;
+                        break;
+                    }
+                }
+
+                // Map Pack rank (Serper `places`) — items have title and (sometimes) website/link
+                for (let i = 0; i < places.length; i++) {
+                    const p = places[i];
+                    const link = p.website || p.link || '';
+                    const title = p.title || p.name || '';
+                    if (matchesBusinessTerms(searchTerms, title, link, p.address || '')) {
+                        rankMap = i + 1;
+                        break;
+                    }
+                }
+
                 topResults = organic.slice(0, 20).map((e, idx) => ({
                     pos: idx + 1,
                     title: e.title || '',
                     link: e.link || '',
                     snippet: e.snippet || ''
                 }));
+                topAds = ads.slice(0, 10).map((a, idx) => ({
+                    pos: idx + 1,
+                    title: a.title || '',
+                    link: a.link || '',
+                    snippet: a.snippet || ''
+                }));
+                topMapPack = places.slice(0, 10).map((p, idx) => ({
+                    pos: idx + 1,
+                    title: p.title || p.name || '',
+                    link: p.website || p.link || '',
+                    snippet: p.address || '',
+                    rating: p.rating || ''
+                }));
+                // LSA isn't in Serper output; topLsa stays empty unless serve.ps1 ran
             }
 
             proj.rankings.push({
@@ -2282,6 +2356,9 @@ async function runScan() {
                 rankOrganic,
                 query,
                 topResults,
+                topAds,
+                topMapPack,
+                topLsa,
                 screenshot,
                 searchMode: scanMode,
                 scannedAt: new Date().toISOString()
@@ -2528,6 +2605,58 @@ function showSearchPreview(keyword, townId, catId) {
 
     const resultsContainer = document.getElementById('search-preview-results');
     const topResults = ranking.topResults || [];
+    const topAds     = ranking.topAds     || [];
+    const topMapPack = ranking.topMapPack || [];
+    const topLsa     = ranking.topLsa     || [];
+
+    // ---- helpers for the SERP preview sections ----
+    const safeDomain = (link) => { try { return new URL(link).hostname; } catch (e) { return link || ''; } };
+
+    function renderAdRow(item, label) {
+        const isMatch = matchesBusinessTerms(searchTerms, item.title, item.link, item.snippet);
+        const domain  = safeDomain(item.link);
+        const highlight = isMatch ? 'border-left:4px solid #00b894;padding-left:12px;background:#f0fdf9;margin-left:-16px;padding-top:8px;padding-bottom:8px;padding-right:8px;border-radius:4px' : '';
+        return `
+            <div style="margin-bottom:18px;max-width:600px;${highlight}">
+                ${isMatch ? `<div style="font-size:11px;font-weight:700;color:#00b894;text-transform:uppercase;margin-bottom:4px">&#x2713; YOUR BUSINESS — ${label} #${item.pos}</div>` : ''}
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+                    <span style="font-size:12px;font-weight:700;color:#202124;border:1px solid #dadce0;border-radius:4px;padding:1px 4px">Ad</span>
+                    <img src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=16" width="16" height="16" style="border-radius:50%" onerror="this.style.display='none'">
+                    <span style="font-size:12px;color:#202124">${esc(domain)}</span>
+                </div>
+                <a href="${esc(item.link)}" target="_blank" style="font-size:20px;color:#1a0dab;text-decoration:none;line-height:1.3;display:inline-block;margin-bottom:2px">${esc(item.title)}</a>
+                <div style="font-size:14px;color:#4d5156;line-height:1.5">${esc(item.snippet || '')}</div>
+            </div>`;
+    }
+
+    function renderPlaceRow(item) {
+        const isMatch = matchesBusinessTerms(searchTerms, item.title, item.link, item.snippet);
+        const highlight = isMatch ? 'border:2px solid #00b894;background:#f0fdf9' : 'border:1px solid #dadce0;background:white';
+        return `
+            <div style="${highlight};border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+                ${isMatch ? `<div style="font-size:10px;font-weight:700;color:#00b894;text-transform:uppercase">&#x2713; YOUR BUSINESS — MAP #${item.pos}</div>` : ''}
+                <div style="font-size:14px;font-weight:600;color:#202124">${item.pos}. ${esc(item.title)}</div>
+                ${item.rating ? `<div style="font-size:12px;color:#70757a">${esc(item.rating)} stars</div>` : ''}
+                ${item.snippet ? `<div style="font-size:12px;color:#5f6368">${esc(item.snippet)}</div>` : ''}
+                ${item.link ? `<a href="${esc(item.link)}" target="_blank" style="font-size:12px;color:#1a73e8;text-decoration:none">${esc(safeDomain(item.link))}</a>` : ''}
+            </div>`;
+    }
+
+    function renderLsaRow(item) {
+        const isMatch = matchesBusinessTerms(searchTerms, item.title, item.link, item.snippet);
+        const highlight = isMatch ? 'border:2px solid #00b894;background:#f0fdf9' : 'border:1px solid #dadce0;background:white';
+        return `
+            <div style="${highlight};border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+                ${isMatch ? `<div style="font-size:10px;font-weight:700;color:#00b894;text-transform:uppercase">&#x2713; YOUR BUSINESS — LSA #${item.pos}</div>` : ''}
+                <div style="font-size:11px;font-weight:700;color:#1a73e8;text-transform:uppercase">Google Guaranteed</div>
+                <div style="font-size:14px;font-weight:600;color:#202124">${item.pos}. ${esc(item.title)}</div>
+                ${item.rating ? `<div style="font-size:12px;color:#70757a">${esc(item.rating)} stars</div>` : ''}
+            </div>`;
+    }
+
+    function sectionHeader(label) {
+        return `<div style="font-size:11px;font-weight:700;color:#5f6368;text-transform:uppercase;margin:8px 0 8px 0;letter-spacing:.5px">${label}</div>`;
+    }
 
     if (ranking.screenshot) {
         // Show actual screenshot
@@ -2538,7 +2667,7 @@ function showSearchPreview(keyword, townId, catId) {
         `;
         resultsContainer.style.transform = 'scale(1)';
         resultsContainer.style.width = '100%';
-    } else if (topResults.length === 0) {
+    } else if (topResults.length === 0 && topAds.length === 0 && topMapPack.length === 0 && topLsa.length === 0) {
         resultsContainer.innerHTML = '<div style="padding:30px;text-align:center;color:#666;font-family:Arial,sans-serif">No stored results. Re-run the scan to capture search results.</div>';
         resultsContainer.style.transform = 'scale(1)';
         resultsContainer.style.width = '100%';
@@ -2568,6 +2697,33 @@ function showSearchPreview(keyword, townId, catId) {
                 <!-- Results -->
                 <div style="padding:12px 20px 20px 20px">
         `;
+
+        // ---- LSA section ----
+        if (topLsa.length > 0) {
+            html += sectionHeader('Local Service Ads (Google Guaranteed)');
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:18px">';
+            for (const item of topLsa) html += renderLsaRow(item);
+            html += '</div>';
+        }
+
+        // ---- PPC / Sponsored ads ----
+        if (topAds.length > 0) {
+            html += sectionHeader('Sponsored');
+            for (const ad of topAds) html += renderAdRow(ad, 'AD');
+        }
+
+        // ---- Map Pack ----
+        if (topMapPack.length > 0) {
+            html += sectionHeader('Map Pack (Local Results)');
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:18px">';
+            for (const item of topMapPack) html += renderPlaceRow(item);
+            html += '</div>';
+        }
+
+        // ---- Organic ----
+        if (topResults.length > 0) {
+            html += sectionHeader('Organic Results');
+        }
 
         for (const result of topResults) {
             const isMatch = matchesBusinessTerms(searchTerms, result.title, result.link, result.snippet);
